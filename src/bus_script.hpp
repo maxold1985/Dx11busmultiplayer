@@ -626,6 +626,19 @@ struct ModScripts {
 		}
 
 		root = directory(entryPath);
+		// The selected INI may live beside a named bus folder (baseDir).
+		// Resolve all Script and O-400 sound paths inside that folder.
+		const Section* baseConfig = descriptor.find("config");
+		if(baseConfig != 0) {
+			const std::string baseDir = normalize(baseConfig->get("basedir"));
+			if(safeRelative(baseDir) && !baseDir.empty()) {
+				const std::string candidate = root + baseDir + "/";
+				if(exists(candidate + "Script/Motor.txt") ||
+					exists(candidate + "script/Motor.txt")) {
+					root = candidate;
+				}
+			}
+		}
 		const Section* config = descriptor.find("config");
 		const Section* data = descriptor.find("data");
 
