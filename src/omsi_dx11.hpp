@@ -217,7 +217,11 @@ inline bool loadAssimpMesh(ID3D11Device* device,Bus& bus,const MeshEntry& entry)
     const aiScene* scene=importer.ReadFile(entry.path,
         aiProcess_Triangulate|aiProcess_PreTransformVertices|
         aiProcess_JoinIdenticalVertices|aiProcess_FlipUVs);
-    if(!scene||!scene->HasMeshes())return false;
+    if(!scene||!scene->HasMeshes()){
+        if(bus.report.size()<12000)bus.report+="Assimp failed: "+entry.path+" : "+importer.GetErrorString()+"\n";
+        return false;
+    }
+    if(bus.report.size()<12000){char info[128];sprintf(info,"Assimp scene: %u meshes, %u materials\\n",scene->mNumMeshes,scene->mNumMaterials);bus.report+=info;}
     bool any=false;
     for(unsigned m=0;m<scene->mNumMeshes;m++) {
         const aiMesh* src=scene->mMeshes[m];
@@ -254,6 +258,7 @@ inline bool loadAssimpMesh(ID3D11Device* device,Bus& bus,const MeshEntry& entry)
             mesh.triangles.push_back(tri);
         }
         if(upload(device,bus,mesh,entry,entry.path))any=true;
+        else if(bus.report.size()<12000){char info[128];sprintf(info,"GPU upload failed: mesh %u, vertices %u, triangles %u\\n",m,(unsigned)mesh.vertices.size(),(unsigned)mesh.triangles.size());bus.report+=info;}
     }
     return any;
 }
@@ -269,7 +274,7 @@ inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
            (name.size()>=4 && name.substr(name.size()-4)==".3ds")) {
 #ifdef BUS_HAS_ASSIMP
             if(loadAssimpMesh(device,bus,entries[i]))++bus.imported;
-            else {++bus.missing;if(bus.report.size()<1200)bus.report+="Failed Assimp mesh "+entries[i].path+"\n";}
+            else {++bus.missing;if(bus.report.size()<12000)bus.report+="Failed Assimp mesh "+entries[i].path+"\n";}
 #else
             ++bus.missing;
             if(bus.report.size()<1200)bus.report+=".x/.3ds requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
