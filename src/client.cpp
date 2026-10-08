@@ -53,6 +53,7 @@ static ID3D11Buffer* cubeVB=0;
 static ID3D11Buffer* constants=0;
 static ID3D11SamplerState* sampler=0;
 static ID3D11BlendState* omsiBlend=0;
+static ID3D11DepthStencilState* glassDepthState=0;
 static ID3D11ShaderResourceView* roadTexture=0;
 static ID3D11ShaderResourceView* busTexture=0;
 static ModelAsset busModel;
@@ -184,6 +185,11 @@ static bool initializeGraphics(HWND hwnd) {
     blend.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;
     blend.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
     if(FAILED(device->CreateBlendState(&blend,&omsiBlend)))return false;
+    D3D11_DEPTH_STENCIL_DESC glassDepth={};
+    glassDepth.DepthEnable=TRUE;
+    glassDepth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
+    glassDepth.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
+    if(FAILED(device->CreateDepthStencilState(&glassDepth,&glassDepthState)))return false;
     roadTexture=makeChecker(85,85,85);
     busTexture=makeChecker(230,232,235);
     // Arquivos opcionais. Em GLB/FBX, Assimp deve estar habilitado no CMake.
@@ -200,7 +206,7 @@ static void shutdownGraphics(){
     if(context)context->ClearState();
     busModel.clear();
     omsiBus.clear();
-    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);releaseObj(omsiBlend);
+    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);releaseObj(omsiBlend);releaseObj(glassDepthState);
     releaseObj(constants);releaseObj(cubeVB);releaseObj(layout);
     releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);
     releaseObj(depthTexture);releaseObj(target);releaseObj(swapChain);
@@ -255,7 +261,13 @@ static void drawOmsiBus(const BusState& b){
     XMMATRIX placement=XMMatrixRotationZ(b.roll)*
         XMMatrixRotationX(b.pitch)*XMMatrixRotationY(b.heading)*
         XMMatrixTranslation(b.x,b.y-1.6f,b.z);
-    for(size_t i=0;i<omsiBus.meshes.size();i++){
+    // First render opaque body/interior into depth, then glass with
+    // depth test enabled but depth writes disabled.
+    for(int pass=0;pass<2;++pass) {
+        if(pass==1) {
+            context->OMSetDepthStencilState(glassDepthState,0);
+        }
+        for(size_t i=0;i<omsiBus.meshes.size();i++){
         const omsi::GpuMesh& mesh=omsiBus.meshes[i];
         // The 3DS wheel transform is local to this mesh: rotate around its
         // tire/axle pivot before applying the bus pose.
@@ -265,11 +277,14 @@ static void drawOmsiBus(const BusState& b){
         context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
         for(size_t j=0;j<mesh.parts.size();j++){
             const omsi::DrawPart& part=mesh.parts[j];
+            if(part.transparent != (pass==1))continue;
             setWorld(world,XMFLOAT4(part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]),part.texture);
             context->IASetIndexBuffer(part.indices,DXGI_FORMAT_R32_UINT,0);
             context->DrawIndexed(part.count,0,0);
         }
     }
+    }
+    context->OMSetDepthStencilState(0,0);
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
     context->OMSetBlendState(0,0,0xFFFFFFFFu);
 }
