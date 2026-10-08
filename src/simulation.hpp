@@ -74,21 +74,38 @@ inline bool overlaps(float ax,float az,float ahx,float ahz,float yaw,
     }
     return true;
 }
-inline bool collidesBuildings(float x,float z,float heading) {
+inline bool collidesBuildings(float x, float z, float heading) {
 	if(!insideMap(x, z, BUS_HALF_LENGTH + 2.0f)) {
 		return true;
 	}
 
-	int i0 = (int)std::floor((x - 30.0f) / MAP_ROAD_SPACING);
-	int j0 = (int)std::floor((z - 30.0f) / MAP_ROAD_SPACING);
-    for(int i=i0;i<=i0+1;i++)for(int j=j0;j<=j0+1;j++) {
-        Box b=building(i,j);
-        if(overlaps(x,z,BUS_HALF_WIDTH,BUS_HALF_LENGTH,heading,
-                    b.x,b.z,b.hx,b.hz,0))return true;
-    }
-    return false;
+	const int i0 = (int)std::floor((x - 30.0f) / MAP_ROAD_SPACING);
+	const int j0 = (int)std::floor((z - 30.0f) / MAP_ROAD_SPACING);
+
+	for(int i = i0; i <= i0 + 1; ++i) {
+		for(int j = j0; j <= j0 + 1; ++j) {
+			const Box block = building(i, j);
+			const bool collision = overlaps(
+				x, z,
+				BUS_HALF_WIDTH, BUS_HALF_LENGTH, heading,
+				block.x, block.z,
+				block.hx, block.hz, 0.0f
+			);
+
+			if(collision) {
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
-struct Stop { float x,z; int waiting; };
+
+struct Stop {
+	float x;
+	float z;
+	int waiting;
+};
 inline Stop stop(int i) {
 	// Stops near the origin are preserved; additional stops extend into
 	// neighborhoods across the 4.08 km wide playable area.
@@ -223,26 +240,48 @@ inline void resetOrigin(Dynamics& dynamics) {
 	dynamics.b.heading = 0.0f;
 }
 
-inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
-    d.throttle=clamp(t,-1,1);
-    d.steering=clamp(steer,-1,1);
-    d.brake=clamp(brake,0,1);
-    const uint32_t pressed=flags & ~d.lastFlags;
+inline void input(
+	Dynamics& d,
+	float throttle,
+	float steering,
+	float brake,
+	uint32_t flags
+) {
+	d.throttle = clamp(throttle, -1.0f, 1.0f);
+	d.steering = clamp(steering, -1.0f, 1.0f);
+	d.brake = clamp(brake, 0.0f, 1.0f);
+
+	const uint32_t pressed = flags & ~d.lastFlags;
+
 	if((pressed & INPUT_RESET_ORIGIN) != 0) {
 		resetOrigin(d);
-		// Preserve the held-key state to avoid resetting every UDP packet.
 		d.lastFlags = flags;
 		return;
 	}
 
-    if(pressed&INPUT_TOGGLE_DOOR) {
-        if(std::fabs(d.b.speed)<0.5f) d.b.door=d.b.door>0.5f?0.0f:1.0f;
-    }
-    if(pressed&INPUT_AUTO_GEAR) d.manualGear=false;
-    if(pressed&INPUT_GEAR_UP) {d.manualGear=true;d.b.gear=std::min(6,d.b.gear+1);}
-    if(pressed&INPUT_GEAR_DOWN) {d.manualGear=true;d.b.gear=std::max(1,d.b.gear-1);}
-    d.lastFlags=flags;
+	if((pressed & INPUT_TOGGLE_DOOR) != 0) {
+		if(std::fabs(d.b.speed) < 0.5f) {
+			d.b.door = d.b.door > 0.5f ? 0.0f : 1.0f;
+		}
+	}
+
+	if((pressed & INPUT_AUTO_GEAR) != 0) {
+		d.manualGear = false;
+	}
+
+	if((pressed & INPUT_GEAR_UP) != 0) {
+		d.manualGear = true;
+		d.b.gear = std::min(6, d.b.gear + 1);
+	}
+
+	if((pressed & INPUT_GEAR_DOWN) != 0) {
+		d.manualGear = true;
+		d.b.gear = std::max(1, d.b.gear - 1);
+	}
+
+	d.lastFlags = flags;
 }
+
 inline float visualTravel(const BusState& b,int i) {
     if(i<0||i>=6)return 0.0f;
     return wheelCompression(wheelRay(b,i));
