@@ -1,17 +1,52 @@
-# DX11 Bus Multiplayer
+# DX11BusMultiplayer
 
-Cliente Direct3D 11 e servidor UDP autoritativo para ate 16 onibus.
+Projeto C++11 de simulador de onibus multiplayer em DirectX 11, com servidor UDP autoritativo, fisica e interface Win32. Repositorio em desenvolvimento; build DX11 no Windows ainda nao validado neste ambiente.
 
-## WinLibs MinGW32
+## Recursos
 
-Instale WinLibs i686, CMake, mingw32-make e `fxc.exe` do Windows SDK. Execute `build_mingw32.bat`.
+- 16 jogadores humanos e 4 veiculos IA no trafego.
+- Simulacao 60 Hz, snapshots UDP 20 Hz, interpolacao visual de estados remotos.
+- Seis rodas com raycasts verticais, molas, amortecedores, arfagem, rolagem e rodas animadas.
+- Colisao OBB/SAT entre onibus e com edificios da cidade procedural.
+- Cidade com cruzamentos, ruas, predios e seis pontos com passageiros visuais.
+- Porta controlavel, embarque por aproximacao e parada, lotacao 40, indicadores de RPM, marcha, velocidade e rota.
+- Motor sintetico via WinMM, camera externa/interna, texturas por WIC.
+- Importador opcional Assimp para GLB/FBX com texturas externas e embutidas.
 
-Servidor: `build_mingw32\bus_server.exe`.
-Cliente: `build_mingw32\bus_client.exe 127.0.0.1`.
-Rede local: substitua o IP pelo IPv4 do servidor. Porta UDP 27015.
+## Compilar com WinLibs MinGW32 i686
 
-Controles: W/S aceleracao e re, A/D direcao, Espaco freio, Esc sair.
+Requer Windows, WinLibs MinGW32, CMake, Windows SDK com Direct3D 11 headers/libs e fxc.exe (shader compiler HLSL).
 
-Protótipo com fisica cinematica e shaders compilados antecipadamente; ainda sem suspensao raycast, colisao, interpolacao, autenticacao ou criptografia.
+1. Ajuste MINGW em build_mingw32.bat conforme a sua pasta.
+2. Defina FXC_EXECUTABLE para o caminho de fxc.exe ou adicione ao PATH.
+3. Execute build_mingw32.bat e confira quaisquer erros.
 
-**Codigo nao validado por build real neste ambiente.**
+Para importar modelos GLB/FBX instale Assimp compilado para i686 com ABI compativel com o mesmo WinLibs. Configure manualmente CMake com BUS_WITH_ASSIMP=ON e assimp_DIR apontando ao pacote CMake dessa biblioteca. O build .bat usa OFF para nao depender de Assimp.
+
+## Executar
+
+Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.exe. Na janela digite o IPv4 do servidor, como 127.0.0.1. Para outros computadores, use o IPv4 da rede local, liberando porta UDP 27015 no firewall. Pode executar bus_client.exe 192.168.1.10 para conectar diretamente.
+
+## Controles
+
+| Tecla | Comando |
+|---|---|
+| W / S | Acelerar / re |
+| A / D | Direcao |
+| Espaco | Frear |
+| E | Porta (com onibus parado) |
+| Q / Z | Marcha acima / abaixo |
+| F1 | Camera interna / externa |
+| Esc | Sair |
+
+## Texturas / modelo
+
+O jogo cria um onibus procedural com textura gerada internamente. Opcionalmente coloque assets/bus.png no mesmo diretorio do executavel. Para modelo GLB/FBX, habilite Assimp e coloque assets/bus.glb ou assets/bus.fbx ao lado do executavel, mantendo texturas referenciadas. O modelo precisa ser exportado na escala e origem certas. Modelos externos nao acompanham o repositorio.
+
+## Testes de fisica sem Windows
+
+Em Linux ou ambiente C++11: cmake -S . -B build_native && cmake --build build_native && ctest --test-dir build_native --output-on-failure
+
+## Limites conhecidos
+
+Este e um prototipo: colisao 2D simplificada, suspensao em terreno por altura, IA de trafego por pontos fixos, contador de passageiros sem pedestres animados, e nenhuma predicao de cliente, NAT traversal, autenticacao, criptografia ou anti-cheat. Nao afirmar compatibilidade WinLibs antes da compilacao real.
