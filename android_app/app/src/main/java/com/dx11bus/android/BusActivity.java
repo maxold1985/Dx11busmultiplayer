@@ -82,6 +82,7 @@ public final class BusActivity extends Activity {
     };
     private String importedModel = "";
     private String importedScript = "";
+    private File lastImportedFolder = null;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -160,6 +161,8 @@ public final class BusActivity extends Activity {
         addAction(actions,"MODELO",() -> openFile(PICK_MODEL));
         addAction(actions,"SCRIPT",() -> openFile(PICK_SCRIPT));
         addAction(actions,"PASTA OMSI",this::openFolder);
+        addAction(actions,"MODELOS MOD",() -> chooseFromImportedFolder(false));
+        addAction(actions,"SCRIPTS MOD",() -> chooseFromImportedFolder(true));
         addAction(actions,"CONECTAR",this::askServer);
         addAction(actions,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
         addAction(actions,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
@@ -378,6 +381,7 @@ public final class BusActivity extends Activity {
                     CopyCounter counter=new CopyCounter();
                     String rootId=DocumentsContract.getTreeDocumentId(uri);
                     copyTree(uri,rootId,folder,counter,0);
+                    lastImportedFolder=folder;
                     ImportSelection selection=new ImportSelection();
                     importedModel="";
                     importedScript="";
@@ -479,6 +483,74 @@ public final class BusActivity extends Activity {
                 }
             }
         }
+    }
+    private void collectChoices(File root,boolean scripts,List<File> list,int depth) {
+        if(depth>20 || list.size()>=180)return;
+        File[] files=root.listFiles();
+        if(files==null)return;
+        java.util.Arrays.sort(files,(a,b)->a.getName().compareToIgnoreCase(b.getName()));
+        for(File file:files) {
+            if(list.size()>=180)return;
+            if(file.isDirectory()) {
+                collectChoices(file,scripts,list,depth+1);
+                continue;
+            }
+            final String lower=file.getName().toLowerCase(java.util.Locale.ROOT);
+            if(scripts) {
+                if(lower.endsWith(".ini") ||
+                   lower.equals("motor.txt") ||
+                   lower.equals("cambio_a.txt") ||
+                   lower.equals("cambio_m.txt"))
+                    list.add(file);
+            } else {
+                if(lower.endsWith(".bus") ||
+                   lower.equals("model.cfg") ||
+                   lower.endsWith(".3ds") ||
+                   lower.endsWith(".o3d") ||
+                   lower.endsWith(".glb") ||
+                   lower.endsWith(".fbx") ||
+                   lower.endsWith(".x"))
+                    list.add(file);
+            }
+        }
+    }
+    private void chooseFromImportedFolder(boolean scripts) {
+        final File root=lastImportedFolder;
+        if(root==null || !root.isDirectory()) {
+            toast("Importe a PASTA OMSI primeiro");
+            return;
+        }
+        List<File> files=new ArrayList<>();
+        collectChoices(root,scripts,files,0);
+        if(files.isEmpty()) {
+            toast("Nenhum arquivo encontrado na pasta importada");
+            return;
+        }
+        String[] labels=new String[files.size()];
+        for(int i=0;i<files.size();++i) {
+            String relative=files.get(i).getAbsolutePath().substring(
+                root.getAbsolutePath().length()+1);
+            labels[i]=relative;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle(scripts?"Escolher script do mod":"Escolher modelo do mod")
+            .setItems(labels,(dialog,selected)->{
+                File picked=files.get(selected);
+                surface.queueEvent(() -> {
+                    boolean ok;
+                    if(scripts) {
+                        importedScript=picked.getAbsolutePath();
+                        ok=nativeLoadScript(importedScript);
+                    } else {
+                        importedModel=picked.getAbsolutePath();
+                        ok=nativeLoadModel(importedModel);
+                    }
+                    runOnUiThread(() -> toast(ok?"Carregado: "+picked.getName():
+                        "Nao foi possivel carregar: "+picked.getName()));
+                });
+            })
+            .setNegativeButton("Cancelar",null)
+            .show();
     }
     private static final class ImportSelection {
         File model,script;
