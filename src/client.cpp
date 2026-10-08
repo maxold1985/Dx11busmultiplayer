@@ -798,12 +798,12 @@ static bool loadBusScriptFiles(
     }
 
     std::string information = scripts.diagnostic;
-    information += "\\n";
+    information += "\n";
     information += importedBusAudio.report();
 
     if(scripts.hasManual || scripts.hasAutomatic) {
         information +=
-            "\\n\\nCAMBIO: carregue esta mesma configuracao no servidor "
+            "\n\nCAMBIO: carregue esta mesma configuracao no servidor "
             "com DX11BUS_MOD_CONFIG e reinicie-o. "
             "A simulacao de transmissoes e autoritativa.";
     }
@@ -814,7 +814,7 @@ static bool loadBusScriptFiles(
     );
 
     if(report != 0) {
-        fprintf(report, "%s\\n", information.c_str());
+        fprintf(report, "%s\n", information.c_str());
         fclose(report);
     }
 
@@ -839,8 +839,8 @@ static void browseBusScripts(HWND hwnd) {
     chooser.lpstrFile = filename;
     chooser.nMaxFile = sizeof(filename);
     chooser.lpstrFilter =
-        "Configuracao do onibus (*.ini;*.txt)\\0*.ini;*.txt\\0"
-        "Todos os arquivos (*.*)\\0*.*\\0";
+        "Configuracao do onibus (*.ini;*.txt)\0*.ini;*.txt\0"
+        "Todos os arquivos (*.*)\0*.*\0";
     chooser.nFilterIndex = 1;
     chooser.Flags =
         OFN_FILEMUSTEXIST |
