@@ -3,6 +3,7 @@
 #include "simulation.hpp"
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
 struct AndroidPlayer {
     bool active;
@@ -27,9 +28,19 @@ int main() {
 
     AndroidPlayer players[MAX_PLAYERS];
     sim::Dynamics traffic[AI_BUSES];
+    buscfg::ModScripts scripts;
+    const char* modPath=getenv("DX11BUS_MOD_CONFIG");
+    const bool customTransmission=modPath && *modPath &&
+        scripts.load(modPath) &&
+        (scripts.hasAutomatic || scripts.hasManual);
+    if(customTransmission)
+        printf("Android server OMSI gearbox: %s\n",modPath);
+    else if(modPath && *modPath)
+        printf("Android server could not load gearbox: %s\n",modPath);
     const float route[4][2] = {{3,3},{3,57},{57,57},{57,3}};
     int waypoint[AI_BUSES] = {};
     for(int i=0;i<AI_BUSES;++i) {
+        if(customTransmission)sim::setDriveProfiles(traffic[i],scripts.automatic,scripts.manual);
         traffic[i].b.id=0x80000000u+(uint32_t)i;
         traffic[i].b.x=route[i][0];
         traffic[i].b.z=route[i][1];
@@ -63,6 +74,8 @@ int main() {
                 }
                 if(index<0) { fromSize=sizeof(from); continue; }
                 players[index]=AndroidPlayer();
+                if(customTransmission)
+                    sim::setDriveProfiles(players[index].physics,scripts.automatic,scripts.manual);
                 players[index].active=true;
                 players[index].address=from;
                 players[index].physics.b.id=nextId++;
