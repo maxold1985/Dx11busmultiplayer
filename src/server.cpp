@@ -63,6 +63,42 @@ int main() {
 	Player players[MAX_PLAYERS];
 	Traffic traffic[AI_BUSES];
 
+	// The server is authoritative: only server-side files control gearing.
+	// Example: set DX11BUS_MOD_CONFIG=C:\\Mods\\GV6\\bus.ini
+	buscfg::ModScripts scripts;
+	char modConfigPath[2048] = {};
+	const DWORD modConfigLength = GetEnvironmentVariableA(
+		"DX11BUS_MOD_CONFIG",
+		modConfigPath,
+		sizeof(modConfigPath)
+	);
+
+	const bool customTransmission =
+		modConfigLength > 0 &&
+		modConfigLength < sizeof(modConfigPath) &&
+		scripts.load(modConfigPath) &&
+		(scripts.hasAutomatic || scripts.hasManual);
+
+	if(customTransmission) {
+		printf(
+			"Script de transmissao carregado: %s\n",
+			modConfigPath
+		);
+		printf(
+			"Manual: %s | Automatico: %s | "
+			"Marchas automaticas: %d | Troca para cima: %.0f RPM\n",
+			scripts.hasManual ? "sim" : "nao",
+			scripts.hasAutomatic ? "sim" : "nao",
+			scripts.automatic.gears,
+			scripts.automatic.upRpm
+		);
+	} else if(modConfigLength > 0) {
+		printf(
+			"Nenhum cambio carregado. Verifique DX11BUS_MOD_CONFIG: %s\n",
+			modConfigPath
+		);
+	}
+
 	const float route[4][2] = {
 		{ 3.0f, 3.0f },
 		{ 3.0f, 57.0f },
@@ -72,6 +108,15 @@ int main() {
 
 	for(int i = 0; i < AI_BUSES; ++i) {
 		Traffic& ai = traffic[i];
+
+		if(customTransmission) {
+			sim::setDriveProfiles(
+				ai.physics,
+				scripts.automatic,
+				scripts.manual
+			);
+		}
+
 		ai.physics.b.id = 0x80000000u + (uint32_t)i;
 		ai.physics.b.x = route[i][0];
 		ai.physics.b.z = route[i][1];
@@ -152,6 +197,14 @@ int main() {
 				players[index] = Player();
 				players[index].active = true;
 				players[index].address = from;
+				if(customTransmission) {
+					sim::setDriveProfiles(
+						players[index].physics,
+						scripts.automatic,
+						scripts.manual
+					);
+				}
+
 				players[index].physics.b.id = nextId++;
 				players[index].physics.b.x = (index % 4) * 3.0f - 4.5f;
 				players[index].physics.b.z = -20.0f + (index / 4) * 12.0f;
