@@ -13,6 +13,8 @@ import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.graphics.Color;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -63,6 +65,15 @@ public final class BusActivity extends Activity {
     private boolean forward, reverse, left, right, brake, clutch;
     private float touchX, touchY, pinchDistance;
     private boolean dragging;
+    private final Runnable statusTicker=new Runnable() {
+        @Override public void run() {
+            if(surface!=null)surface.queueEvent(() -> {
+                final String text=nativeStatus();
+                runOnUiThread(() -> status.setText(text));
+            });
+            handler.postDelayed(this,500);
+        }
+    };
     private final Runnable frameTicker=new Runnable() {
         @Override public void run() {
             if(surface!=null)surface.requestRender();
@@ -192,15 +203,7 @@ public final class BusActivity extends Activity {
         root.addView(bottom,bottomParams);
         setContentView(root);
 
-        handler.postDelayed(new Runnable() {
-            @Override public void run() {
-                if(surface!=null) surface.queueEvent(() -> {
-                    String text=nativeStatus();
-                    runOnUiThread(() -> status.setText(text));
-                });
-                handler.postDelayed(this,500);
-            }
-        },500);
+        handler.postDelayed(statusTicker,500);
     }
 
     private int dp(int n) {
@@ -280,11 +283,67 @@ public final class BusActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this,message,Toast.LENGTH_SHORT).show();
     }
+    @Override public boolean onKeyDown(int keyCode,KeyEvent event) {
+        switch(keyCode) {
+            case KeyEvent.KEYCODE_W: setKey(1,true);return true;
+            case KeyEvent.KEYCODE_S: setKey(2,true);return true;
+            case KeyEvent.KEYCODE_A: setKey(3,true);return true;
+            case KeyEvent.KEYCODE_D: setKey(4,true);return true;
+            case KeyEvent.KEYCODE_SPACE: setKey(5,true);return true;
+            case KeyEvent.KEYCODE_TAB: setKey(6,true);return true;
+            case KeyEvent.KEYCODE_E:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(1));
+                return true;
+            case KeyEvent.KEYCODE_Q:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(2));
+                return true;
+            case KeyEvent.KEYCODE_Z:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(4));
+                return true;
+            case KeyEvent.KEYCODE_G:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(8));
+                return true;
+            case KeyEvent.KEYCODE_R:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(16));
+                return true;
+            case KeyEvent.KEYCODE_H:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeSoundEvent("horn"));
+                return true;
+            case KeyEvent.KEYCODE_B:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeSoundEvent("stopRequest"));
+                return true;
+            case KeyEvent.KEYCODE_F1:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(BusActivity::nativeCockpit);
+                return true;
+            default:return super.onKeyDown(keyCode,event);
+        }
+    }
+    @Override public boolean onKeyUp(int keyCode,KeyEvent event) {
+        switch(keyCode) {
+            case KeyEvent.KEYCODE_W:setKey(1,false);return true;
+            case KeyEvent.KEYCODE_S:setKey(2,false);return true;
+            case KeyEvent.KEYCODE_A:setKey(3,false);return true;
+            case KeyEvent.KEYCODE_D:setKey(4,false);return true;
+            case KeyEvent.KEYCODE_SPACE:setKey(5,false);return true;
+            case KeyEvent.KEYCODE_TAB:setKey(6,false);return true;
+            default:return super.onKeyUp(keyCode,event);
+        }
+    }
+
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
     @Override protected void onPause() {
+        handler.removeCallbacks(statusTicker);
         forward=reverse=left=right=brake=clutch=false;
         handler.removeCallbacks(frameTicker);
         surface.queueEvent(() -> {
@@ -301,6 +360,8 @@ public final class BusActivity extends Activity {
             surface.queueEvent(BusActivity::nativeResume);
             handler.removeCallbacks(frameTicker);
             handler.postDelayed(frameTicker,33);
+            handler.removeCallbacks(statusTicker);
+            handler.postDelayed(statusTicker,500);
         }
     }
 
