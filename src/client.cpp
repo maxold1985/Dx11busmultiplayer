@@ -24,7 +24,15 @@
 using namespace DirectX;
 
 struct SceneConstants {XMFLOAT4X4 transform;XMFLOAT4 color;XMFLOAT4 flags;};
-static HWND windowHandle=0,ipLabel=0,ipInput=0,connectButton=0,omsiButton=0;
+static HWND windowHandle = 0;
+static HWND ipLabel = 0;
+static HWND ipInput = 0;
+static HWND connectButton = 0;
+static HWND omsiButton = 0;
+static HWND resetButton = 0;
+
+static bool resetRequested = false;
+static DWORD resetRequestedAt = 0;
 static ID3D11Device* device=0;
 static ID3D11DeviceContext* context=0;
 static IDXGISwapChain* swapChain=0;
@@ -279,37 +287,177 @@ static void drawBus(const BusState& b,bool mine) {
         drawBusPart(b,x*1.17f,y,z,0.07f,0.17f,0.17f,XMFLOAT4(0.58f,0.60f,0.62f,1),0,sim::wheelSteerAngle(b,i),b.wheelRotation);
     }
 }
-static void drawCity() {
-    const XMFLOAT4 grass(0.26f,0.39f,0.20f,1),asphalt(0.55f,0.57f,0.61f,1);
-    drawBox(0,-0.30f,0,240,0.30f,240,0,grass);
-    for(int i=-3;i<=3;i++) {
-        float coordinate=i*60.0f;
-        drawBox(coordinate,0.001f,0,7.0f,0.02f,230,0,asphalt,roadTexture);
-        drawBox(0,0.001f,coordinate,230,0.02f,7.0f,0,asphalt,roadTexture);
-        for(int j=-12;j<=12;j++){
-            drawBox(coordinate,0.03f,j*9.0f,0.085f,0.021f,2.2f,0,XMFLOAT4(1,0.89f,0.44f,1));
-            drawBox(j*9.0f,0.03f,coordinate,2.2f,0.021f,0.085f,0,XMFLOAT4(1,0.89f,0.44f,1));
-        }
-    }
-    for(int i=-3;i<=2;i++)for(int j=-3;j<=2;j++){
-        sim::Box box=sim::building(i,j);
-        float height=5.0f+float((i*i+j*j*3+17)%5)*1.4f;
-        drawBox(box.x,height*0.5f,box.z,box.hx,height*0.5f,box.hz,0,
-                XMFLOAT4(0.58f,0.58f+float((i+3)%3)*0.05f,0.54f,1));
-        drawBox(box.x,height+0.20f,box.z,box.hx+0.3f,0.25f,box.hz+0.3f,0,
-                XMFLOAT4(0.24f,0.26f,0.31f,1));
-    }
-    for(int i=0;i<sim::STOP_COUNT;i++) {
-        sim::Stop s=sim::stop(i);
-        drawBox(s.x+2.4f,1.35f,s.z,0.065f,1.35f,0.065f,0,XMFLOAT4(0.5f,0.5f,0.56f,1));
-        drawBox(s.x+2.4f,2.58f,s.z,0.85f,0.27f,0.09f,0,XMFLOAT4(0.15f,0.38f,0.85f,1));
-        for(int n=0;n<3;n++) {
-            float px=s.x+2.3f+float(n%2)*0.75f,pz=s.z+2.8f+float(n)*1.0f;
-            drawBox(px,0.86f,pz,0.18f,0.58f,0.18f,0,XMFLOAT4(0.25f,0.30f,0.72f,1));
-            drawBox(px,1.60f,pz,0.17f,0.17f,0.17f,0,XMFLOAT4(0.95f,0.69f,0.45f,1));
-        }
-    }
+static void drawCity(const BusState& focus) {
+	const XMFLOAT4 grass(0.26f, 0.39f, 0.20f, 1.0f);
+	const XMFLOAT4 asphalt(0.55f, 0.57f, 0.61f, 1.0f);
+	const XMFLOAT4 marking(1.0f, 0.89f, 0.44f, 1.0f);
+	const XMFLOAT4 roof(0.24f, 0.26f, 0.31f, 1.0f);
+
+	// The world is 4080 x 4080 metres. Only nearby city objects
+	// are rendered; buildings and streets stay deterministic.
+	drawBox(
+		0.0f, -0.30f, 0.0f,
+		sim::MAP_HALF_EXTENT, 0.30f, sim::MAP_HALF_EXTENT,
+		0.0f, grass
+	);
+
+	const int centerX = sim::roadIndex(focus.x);
+	const int centerZ = sim::roadIndex(focus.z);
+	const int radius = sim::MAP_RENDER_RADIUS;
+	const int minX = std::max(-sim::MAP_GRID_RADIUS, centerX - radius);
+	const int maxX = std::min(sim::MAP_GRID_RADIUS, centerX + radius);
+	const int minZ = std::max(-sim::MAP_GRID_RADIUS, centerZ - radius);
+	const int maxZ = std::min(sim::MAP_GRID_RADIUS, centerZ + radius);
+
+	// Road strips cross the entire map; nearby strips only.
+	for(int i = minX; i <= maxX; ++i) {
+		const float x = i * sim::MAP_ROAD_SPACING;
+		drawBox(
+			x, 0.001f, 0.0f,
+			7.0f, 0.02f, sim::MAP_HALF_EXTENT,
+			0.0f, asphalt, roadTexture
+		);
+	}
+
+	for(int j = minZ; j <= maxZ; ++j) {
+		const float z = j * sim::MAP_ROAD_SPACING;
+		drawBox(
+			0.0f, 0.001f, z,
+			sim::MAP_HALF_EXTENT, 0.02f, 7.0f,
+			0.0f, asphalt, roadTexture
+		);
+	}
+
+	// Dashes are kept close to the camera to save DX11 draw calls.
+	const int markingRadius = 2;
+
+	for(int i = minX; i <= maxX; ++i) {
+		const float x = i * sim::MAP_ROAD_SPACING;
+
+		for(int j = centerZ - markingRadius; j <= centerZ + markingRadius; ++j) {
+			if(j < -sim::MAP_GRID_RADIUS || j >= sim::MAP_GRID_RADIUS) {
+				continue;
+			}
+
+			for(int dash = 0; dash < 3; ++dash) {
+				const float z = (
+					(float)j + 0.20f + 0.30f * (float)dash
+				) * sim::MAP_ROAD_SPACING;
+
+				drawBox(
+					x, 0.03f, z,
+					0.085f, 0.021f, 2.2f,
+					0.0f, marking
+				);
+			}
+		}
+	}
+
+	for(int j = minZ; j <= maxZ; ++j) {
+		const float z = j * sim::MAP_ROAD_SPACING;
+
+		for(int i = centerX - markingRadius; i <= centerX + markingRadius; ++i) {
+			if(i < -sim::MAP_GRID_RADIUS || i >= sim::MAP_GRID_RADIUS) {
+				continue;
+			}
+
+			for(int dash = 0; dash < 3; ++dash) {
+				const float x = (
+					(float)i + 0.20f + 0.30f * (float)dash
+				) * sim::MAP_ROAD_SPACING;
+
+				drawBox(
+					x, 0.03f, z,
+					2.2f, 0.021f, 0.085f,
+					0.0f, marking
+				);
+			}
+		}
+	}
+
+	// One building per block; only blocks near the bus are drawn.
+	for(int i = std::max(-sim::MAP_GRID_RADIUS, centerX - radius);
+		i <= std::min(sim::MAP_GRID_RADIUS - 1, centerX + radius);
+		++i) {
+
+		for(int j = std::max(-sim::MAP_GRID_RADIUS, centerZ - radius);
+			j <= std::min(sim::MAP_GRID_RADIUS - 1, centerZ + radius);
+			++j) {
+
+			const sim::Box building = sim::building(i, j);
+			const int hash = (std::abs(i) * 7 + std::abs(j) * 13 + 17);
+			const float height = 5.0f + (float)(hash % 5) * 1.4f;
+			const float green = 0.58f + (float)(hash % 3) * 0.05f;
+
+			drawBox(
+				building.x, height * 0.5f, building.z,
+				building.hx, height * 0.5f, building.hz,
+				0.0f, XMFLOAT4(0.58f, green, 0.54f, 1.0f)
+			);
+
+			drawBox(
+				building.x, height + 0.20f, building.z,
+				building.hx + 0.3f, 0.25f, building.hz + 0.3f,
+				0.0f, roof
+			);
+		}
+	}
+
+	// Bus-stop geometry is also streamed around the player.
+	for(int i = 0; i < sim::STOP_COUNT; ++i) {
+		const sim::Stop stop = sim::stop(i);
+
+		if(std::fabs(stop.x - focus.x) > 320.0f ||
+			std::fabs(stop.z - focus.z) > 320.0f) {
+			continue;
+		}
+
+		drawBox(
+			stop.x + 2.4f, 1.35f, stop.z,
+			0.065f, 1.35f, 0.065f,
+			0.0f, XMFLOAT4(0.5f, 0.5f, 0.56f, 1.0f)
+		);
+
+		drawBox(
+			stop.x + 2.4f, 2.58f, stop.z,
+			0.85f, 0.27f, 0.09f,
+			0.0f, XMFLOAT4(0.15f, 0.38f, 0.85f, 1.0f)
+		);
+
+		for(int passenger = 0; passenger < 3; ++passenger) {
+			const float px = stop.x + 2.3f + (float)(passenger % 2) * 0.75f;
+			const float pz = stop.z + 2.8f + (float)passenger;
+
+			drawBox(
+				px, 0.86f, pz,
+				0.18f, 0.58f, 0.18f,
+				0.0f, XMFLOAT4(0.25f, 0.30f, 0.72f, 1.0f)
+			);
+
+			drawBox(
+				px, 1.60f, pz,
+				0.17f, 0.17f, 0.17f,
+				0.0f, XMFLOAT4(0.95f, 0.69f, 0.45f, 1.0f)
+			);
+		}
+	}
+
+	// A small cross marks the reset origin (X=0, Z=0).
+	if(std::fabs(focus.x) < 320.0f && std::fabs(focus.z) < 320.0f) {
+		drawBox(
+			0.0f, 0.055f, 0.0f,
+			2.0f, 0.03f, 0.12f,
+			0.0f, XMFLOAT4(0.90f, 0.20f, 0.16f, 1.0f)
+		);
+
+		drawBox(
+			0.0f, 0.055f, 0.0f,
+			0.12f, 0.03f, 2.0f,
+			0.0f, XMFLOAT4(0.16f, 0.39f, 0.90f, 1.0f)
+		);
+	}
 }
+
 static const BusState* findBus(const Snapshot& s,uint32_t id){
     for(uint32_t i=0;i<s.count;i++)if(s.buses[i].id==id)return &s.buses[i];
     return 0;
@@ -365,7 +513,7 @@ static void drawFrame(){
     }
     cameraMatrix=XMMatrixLookAtLH(eye,at,XMVectorSet(0,1,0,0))*
         XMMatrixPerspectiveFovLH(XM_PIDIV4,float(WIDTH)/HEIGHT,0.1f,800.0f);
-    drawCity();
+    drawCity(focus);
     for(uint32_t i=0;i<latest.count;i++) {
         if(cockpit && latest.buses[i].id==myId)continue;
         drawBus(currentBus(latest.buses[i].id,alpha),latest.buses[i].id==myId);
@@ -376,30 +524,89 @@ static void drawFrame(){
         if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
             sprintf(title,"DX11 Bus | Sem resposta do servidor ha mais de 3 segundos");
         else if(latest.count>0)
-            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera | RMB orbita | roda zoom | E porta Q/Z manual G auto",
+            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera | RMB orbita | roda zoom | R origem | X %.0f Z %.0f | E porta Q/Z manual G auto",
                myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
-               (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count);
+               (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count,
+               focus.x,focus.z);
         else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
         SetWindowTextA(windowHandle,title);lastHud=GetTickCount();
     }
     swapChain->Present(1,0);
 }
-static void sendControls() {
-    if(!connected)return;
-    NetPacket packet;initPacket(packet,PACKET_INPUT);
-    packet.clientId=myId;
-    bool foreground=GetForegroundWindow()==windowHandle;
-    if(foreground){
-        packet.throttle=float((GetAsyncKeyState('W')&0x8000)?1:0)-float((GetAsyncKeyState('S')&0x8000)?1:0);
-        packet.steering=float((GetAsyncKeyState('D')&0x8000)?1:0)-float((GetAsyncKeyState('A')&0x8000)?1:0);
-        packet.brake=(GetAsyncKeyState(VK_SPACE)&0x8000)?1.0f:0;
-        if(GetAsyncKeyState('E')&0x8000)packet.flags|=INPUT_TOGGLE_DOOR;
-        if(GetAsyncKeyState('Q')&0x8000)packet.flags|=INPUT_GEAR_UP;
-        if(GetAsyncKeyState('Z')&0x8000)packet.flags|=INPUT_GEAR_DOWN;
-        if(GetAsyncKeyState('G')&0x8000)packet.flags|=INPUT_AUTO_GEAR;
-    }
-    sendto(socketUdp,(char*)&packet,sizeof(packet),0,(sockaddr*)&serverAddress,sizeof(serverAddress));
+static void requestOriginReset() {
+	if(!connected) {
+		return;
+	}
+
+	resetRequestedAt = GetTickCount();
+	resetRequested = true;
+
+	// Recenter the orbit camera as the bus returns to the world origin.
+	orbitYaw = 0.0f;
+	orbitPitch = 0.38f;
+	orbitDistance = 16.0f;
 }
+
+static void sendControls() {
+	if(!connected) {
+		return;
+	}
+
+	NetPacket packet;
+	initPacket(packet, PACKET_INPUT);
+	packet.clientId = myId;
+
+	if(GetForegroundWindow() == windowHandle) {
+		packet.throttle =
+			((GetAsyncKeyState('W') & 0x8000) ? 1.0f : 0.0f) -
+			((GetAsyncKeyState('S') & 0x8000) ? 1.0f : 0.0f);
+
+		packet.steering =
+			((GetAsyncKeyState('D') & 0x8000) ? 1.0f : 0.0f) -
+			((GetAsyncKeyState('A') & 0x8000) ? 1.0f : 0.0f);
+
+		packet.brake =
+			(GetAsyncKeyState(VK_SPACE) & 0x8000) ? 1.0f : 0.0f;
+
+		if(GetAsyncKeyState('E') & 0x8000) {
+			packet.flags |= INPUT_TOGGLE_DOOR;
+		}
+
+		if(GetAsyncKeyState('Q') & 0x8000) {
+			packet.flags |= INPUT_GEAR_UP;
+		}
+
+		if(GetAsyncKeyState('Z') & 0x8000) {
+			packet.flags |= INPUT_GEAR_DOWN;
+		}
+
+		if(GetAsyncKeyState('G') & 0x8000) {
+			packet.flags |= INPUT_AUTO_GEAR;
+		}
+	}
+
+	// Send the reset request for 300 ms so a single dropped UDP
+	// packet does not lose it. The server applies it once per press.
+	if(resetRequested) {
+		const DWORD elapsed = GetTickCount() - resetRequestedAt;
+
+		if(elapsed < 300) {
+			packet.flags |= INPUT_RESET_ORIGIN;
+		} else {
+			resetRequested = false;
+		}
+	}
+
+	sendto(
+		socketUdp,
+		(const char*)&packet,
+		sizeof(packet),
+		0,
+		(sockaddr*)&serverAddress,
+		sizeof(serverAddress)
+	);
+}
+
 static void receiveUpdates() {
     if(!connected)return;
     NetPacket packet; sockaddr_in sender={};int senderSize=sizeof(sender);int n;
@@ -431,6 +638,7 @@ static bool connectTo(const char* ipv4) {
     connected=true;myId=0;gotSnapshot=false;lastTick=0;earlier=Snapshot();latest=Snapshot();
     ShowWindow(ipLabel,SW_HIDE);ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
     motor.start();
+	EnableWindow(resetButton, TRUE);
     return true;
 }
 static void browseOmsiModel(HWND hwnd){
@@ -494,8 +702,16 @@ static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_KEYDOWN){
         if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}
         if(w==VK_F1 && !((l>>30)&1)){cockpit=!cockpit;return 0;}
+		if(w=='R' && !((l>>30)&1)) {
+			requestOriginReset();
+			return 0;
+		}
     }
     if(msg==WM_COMMAND && LOWORD(w)==103){browseOmsiModel(hwnd);return 0;}
+	if(msg == WM_COMMAND && LOWORD(w) == 104) {
+		requestOriginReset();
+		return 0;
+	}
     if(msg==WM_COMMAND && LOWORD(w)==102){
         char ipv4[80]={};GetWindowTextA(ipInput,ipv4,80);
         if(!connectTo(ipv4))
@@ -521,6 +737,12 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
          335,14,110,27,windowHandle,(HMENU)102,instance,0);
     omsiButton=CreateWindowA("BUTTON","Carregar OMSI (.bus/.3ds)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
          460,14,195,27,windowHandle,(HMENU)103,instance,0);
+	resetButton = CreateWindowA(
+		"BUTTON", "Reset origem (R)",
+		WS_CHILD | WS_VISIBLE | WS_DISABLED | BS_PUSHBUTTON,
+		670, 14, 150, 27,
+		windowHandle, (HMENU)104, instance, 0
+	);
     ShowWindow(windowHandle,show);
     if(!initializeGraphics(windowHandle)){
         MessageBoxA(windowHandle,"Nao foi possivel inicializar DX11 ou carregar os shaders .cso.","DX11 Bus",MB_ICONERROR);
