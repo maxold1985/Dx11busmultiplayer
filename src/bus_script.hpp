@@ -11,7 +11,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 
 namespace buscfg {
 
@@ -603,26 +608,49 @@ inline std::vector<SoundSpec> readSounds(const Ini& ini) {
 
 // Search by basename only, bounded to avoid scanning unrelated folders.
 inline std::string findSoundRecursive(const std::string& folder,
-	const std::string& wanted,int depth,int& remaining) {
-	if(depth>6 || remaining<=0)return "";
-	WIN32_FIND_DATAA entry;
-	const HANDLE handle=FindFirstFileA((folder+"*").c_str(),&entry);
-	if(handle==INVALID_HANDLE_VALUE)return "";
-	std::string found;
-	do {
-		if(--remaining<0)break;
-		const std::string name=entry.cFileName;
-		if(name=="." || name=="..")continue;
-		const std::string full=folder+name;
-		if((entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0) {
-			found=findSoundRecursive(full+"/",wanted,depth+1,remaining);
-		} else if(lower(name)==wanted) {
-			found=full;
-		}
-		if(!found.empty())break;
-	} while(FindNextFileA(handle,&entry));
-	FindClose(handle);
-	return found;
+    const std::string& wanted,int depth,int& remaining) {
+    if(depth>6 || remaining<=0)return "";
+#ifdef _WIN32
+    WIN32_FIND_DATAA entry;
+    const HANDLE handle=FindFirstFileA((folder+"*").c_str(),&entry);
+    if(handle==INVALID_HANDLE_VALUE)return "";
+    std::string found;
+    do {
+        if(--remaining<0)break;
+        const std::string name=entry.cFileName;
+        if(name=="." || name=="..")continue;
+        const std::string full=folder+name;
+        if((entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0) {
+            found=findSoundRecursive(full+"/",wanted,depth+1,remaining);
+        } else if(lower(name)==wanted) {
+            found=full;
+        }
+        if(!found.empty())break;
+    } while(FindNextFileA(handle,&entry));
+    FindClose(handle);
+    return found;
+#else
+    DIR* dir=opendir(folder.c_str());
+    if(!dir)return "";
+    std::string found;
+    struct dirent* entry=0;
+    while((entry=readdir(dir))!=0 && remaining>0) {
+        --remaining;
+        const std::string name=entry->d_name;
+        if(name=="." || name=="..")continue;
+        const std::string full=folder+name;
+        struct stat st;
+        if(stat(full.c_str(),&st)!=0)continue;
+        if(S_ISDIR(st.st_mode)) {
+            found=findSoundRecursive(full+"/",wanted,depth+1,remaining);
+        } else if(S_ISREG(st.st_mode) && lower(name)==wanted) {
+            found=full;
+        }
+        if(!found.empty())break;
+    }
+    closedir(dir);
+    return found;
+#endif
 }
 
 struct EventSound {
