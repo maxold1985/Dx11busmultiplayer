@@ -28,7 +28,8 @@ enum InputFlags {
 	INPUT_GEAR_DOWN = 4,
 	INPUT_AUTO_GEAR = 8,
 	INPUT_RESET_ORIGIN = 16,
-	INPUT_TOGGLE_OMSI_STEERING = 32
+	INPUT_TOGGLE_OMSI_STEERING = 32,
+	INPUT_CLUTCH = 64
 };
 
 enum SteeringMode {
@@ -65,6 +66,7 @@ struct BusState {
 	uint32_t nextStop;
 	uint32_t steeringMode;
 	uint32_t transmissionMode;
+	float clutch;
 };
 
 struct NetPacket {
