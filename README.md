@@ -35,7 +35,8 @@ Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.e
 | A / D | Direcao |
 | Espaco | Frear |
 | E | Porta (com onibus parado) |
-| Q / Z | Marcha acima / abaixo |
+| Q / Z | Marcha manual acima / abaixo |
+| G | Retomar cambio automatico |
 | F1 | Camera interna / externa |
 | Esc | Sair |
 
