@@ -51,4 +51,5 @@ if(BUS_WITH_ASSIMP)
 endif()
 add_custom_command(TARGET bus_client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${VS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_vs.cso"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_ps.cso")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_ps.cso"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:bus_client>/assets")
