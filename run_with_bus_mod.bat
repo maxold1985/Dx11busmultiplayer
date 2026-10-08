@@ -20,8 +20,17 @@ if not exist "%DX11BUS_MOD_CONFIG%" (
 	exit /b 2
 )
 
-set "BUS_SERVER=%~dp0build_mingw32\bus_server.exe"
-set "BUS_CLIENT=%~dp0build_mingw32\bus_client.exe"
+set "BUS_DIR=%~dp0build_mingw32"
+if not exist "%BUS_DIR%\bus_server.exe" (
+    if exist "%~dp0build\bus_server.exe" (
+        if exist "%~dp0build\bus_client.exe" (
+            set "BUS_DIR=%~dp0build"
+        )
+    )
+)
+
+set "BUS_SERVER=%BUS_DIR%\bus_server.exe"
+set "BUS_CLIENT=%BUS_DIR%\bus_client.exe"
 
 if not exist "%BUS_SERVER%" (
 	echo ERROR: Missing server executable:
@@ -43,11 +52,11 @@ echo Script:
 echo "%DX11BUS_MOD_CONFIG%"
 echo.
 echo Starting server with automatic and manual gearbox configuration...
-start "DX11BusServer" /D "%~dp0build_mingw32" "%BUS_SERVER%"
+start "DX11BusServer" /D "%BUS_DIR%" "%BUS_SERVER%"
 
 timeout /t 2 /nobreak >nul
 
 echo Starting DX11 client with mod sound configuration...
-start "DX11BusClient" /D "%~dp0build_mingw32" "%BUS_CLIENT%"
+start "DX11BusClient" /D "%BUS_DIR%" "%BUS_CLIENT%"
 
 endlocal
