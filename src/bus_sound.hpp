@@ -46,6 +46,10 @@ private:
 	WAVEHDR headers[BUFFER_COUNT];
 	short pcm[BUFFER_COUNT][CHUNK];
 	std::vector<Track> tracks;
+	std::vector<Track> events;
+	std::vector<int> eventPlaying;
+	std::vector<double> eventPosition;
+	std::vector<float> eventVolume;
 	float currentRpm;
 	float currentThrottle;
 	float currentSpeed;
@@ -313,6 +317,26 @@ private:
 				}
 			}
 
+			for(size_t i=0;i<events.size();++i) {
+				if(eventPlaying[i]==0)continue;
+				Track& event=events[i];
+				const size_t frames=event.clip.mono.size();
+				if(frames<2)continue;
+				const size_t pos=(size_t)eventPosition[i];
+				if(pos>=frames) {
+					eventPlaying[i]=0;
+					continue;
+				}
+				const size_t next=std::min(pos+1,frames-1);
+				const float fraction=(float)(eventPosition[i]-pos);
+				const float sample=event.clip.mono[pos]+
+					(event.clip.mono[next]-event.clip.mono[pos])*fraction;
+				if(passesCamera(event.spec))mixed+=sample*eventVolume[i]*0.30f;
+				eventPosition[i]+=(double)event.clip.sampleRate*
+					event.spec.pitchMultiplier/OUTPUT_RATE;
+				if(eventPosition[i]>=frames)eventPlaying[i]=0;
+			}
+
 			mixed = buscfg::bounded(mixed, -1.0f, 1.0f);
 			pcm[bufferIndex][sampleIndex] = (short)(mixed * 28000.0f);
 		}
@@ -333,6 +357,10 @@ public:
 	bool load(const buscfg::ModScripts& scripts) {
 		stop();
 		tracks.clear();
+		events.clear();
+		eventPlaying.clear();
+		eventPosition.clear();
+		eventVolume.clear();
 		reportMessage.clear();
 
 		maximumRpm = scripts.soundMaxRpm;
@@ -409,6 +437,33 @@ public:
 			tracks.push_back(track);
 		}
 
+		int eventLoaded=0;
+		int eventMissing=0;
+		for(size_t i=0;i<scripts.eventSounds.size();++i) {
+			if(events.size()>=64)break;
+			const buscfg::EventSound& entry=scripts.eventSounds[i];
+			const std::string file=scripts.locateSound(entry.sound);
+			if(file.empty()) {
+				++eventMissing;
+				continue;
+			}
+			Track track;
+			track.spec=entry.sound;
+			if(!loadClip(file,track.clip)) {
+				++failed;
+				continue;
+			}
+			events.push_back(track);
+			eventPlaying.push_back(0);
+			eventPosition.push_back(0.0);
+			eventVolume.push_back(track.spec.volumeMultiplier);
+			++eventLoaded;
+		}
+		char eventReport[128];
+		sprintf(eventReport,"Named event samples: %d loaded, %d missing.\n",
+			eventLoaded,eventMissing);
+		details+=eventReport;
+
 		char message[320];
 		sprintf(
 			message,
@@ -423,7 +478,18 @@ public:
 
 		reportMessage = message;
 		reportMessage += "\n" + details;
-		return !tracks.empty();
+		return !tracks.empty() || !events.empty();
+	}
+
+	bool trigger(const std::string& name) {
+		for(size_t i=0;i<events.size();++i) {
+			if(events[i].spec.section==buscfg::lower(name)) {
+				eventPosition[i]=0.0;
+				eventPlaying[i]=1;
+				return true;
+			}
+		}
+		return false;
 	}
 
 	bool start() {
@@ -431,7 +497,7 @@ public:
 			return true;
 		}
 
-		if(tracks.empty()) {
+		if(tracks.empty() && events.empty()) {
 			return false;
 		}
 
@@ -536,7 +602,7 @@ public:
 	}
 
 	bool hasSounds() const {
-		return !tracks.empty();
+		return !tracks.empty() || !events.empty();
 	}
 
 	bool playing() const {
