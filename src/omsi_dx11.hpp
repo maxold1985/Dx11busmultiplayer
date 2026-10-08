@@ -108,7 +108,8 @@ struct DrawPart {
     ID3D11ShaderResourceView* texture; // owned by Bus::textureCache
     UINT count;
     float rgba[4];
-    DrawPart():indices(0),texture(0),count(0){for(int i=0;i<4;i++)rgba[i]=1;}
+    bool transparent;
+    DrawPart():indices(0),texture(0),count(0),transparent(false){for(int i=0;i<4;i++)rgba[i]=1;}
 };
 struct GpuMesh {
     ID3D11Buffer* vertices;
@@ -210,7 +211,18 @@ inline bool upload(ID3D11Device* device,Bus& bus,const Mesh& mesh,
         if(FAILED(device->CreateBuffer(&bd,&init,&part.indices)))continue;
         part.count=(UINT)indices.size();
         memcpy(part.rgba,mesh.materials[material].rgba,sizeof(part.rgba));
-        part.rgba[3]=1.0f; // alpha do material O3D tambem pode ser mascara de reflexao
+        // Glass in many OMSI/3DS mods has opaque diffuse alpha despite
+        // being a window. Identify it from material texture names.
+        std::string glassName=mesh.materials[material].texture;
+        for(size_t k=0;k<glassName.size();++k) {
+            glassName[k]=(char)std::tolower((unsigned char)glassName[k]);
+        }
+        part.transparent=
+            glassName.find("glass")!=std::string::npos ||
+            glassName.find("vidro")!=std::string::npos ||
+            glassName.find("window")!=std::string::npos ||
+            glassName.find("janela")!=std::string::npos;
+        part.rgba[3]=part.transparent ? 0.30f : 1.0f;
         part.texture=findTexture(device,bus,filename,mesh.materials[material].texture);
         gpu.parts.push_back(part);
     }
