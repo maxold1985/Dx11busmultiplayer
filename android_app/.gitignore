@@ -1,0 +1,13 @@
+# Android Studio / Gradle generated files
+.gradle/
+build/
+app/build/
+app/.cxx/
+.cxx/
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+*.apk
+*.aab
