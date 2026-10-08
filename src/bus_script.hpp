@@ -735,6 +735,12 @@ struct ModScripts {
 		const std::string normalized = normalize(sound.file);
 		const std::string base = directory(soundConfigPath);
 		const std::string candidates[] = {
+			// Marcopolo O-400 packs keep the OGG files in engine-specific
+			// directories, not always under the conventional Sound folder.
+			root + "O-400/" + normalized,
+			root + "O-400/Mercedes Benz O400/" + normalized,
+			root + "O-400/motor externo/" + normalized,
+			root + "O-400/motor interno/" + normalized,
 			root + "Sound/" + normalized,
 			root + "Sounds/" + normalized,
 			root + "sound/" + normalized,
