@@ -271,7 +271,13 @@ public final class BusActivity extends Activity {
         if(s==0)s=padSteering;
         float b=Math.max(brake?1.0f:0.0f,padBrake);
         float c=clutch?1.0f:0.0f;
-        surface.queueEvent(() -> nativeControls(t,s,b,c));
+        final float finalThrottle=t;
+        final float finalSteering=s;
+        final float finalBrake=b;
+        final float finalClutch=c;
+        surface.queueEvent(() ->
+            nativeControls(finalThrottle,finalSteering,finalBrake,finalClutch)
+        );
     }
     private void openFile(int request) {
         Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
