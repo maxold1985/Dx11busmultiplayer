@@ -275,8 +275,8 @@ static void drawBus(const BusState& b,bool mine) {
         float x=sim::wheelOffsetX(i),z=sim::wheelOffsetZ(i);
         float compression=sim::visualTravel(b,i);
         float y=-0.4f-(sim::SPRING_REST-compression);
-        drawBusPart(b,x,y,z,0.20f,0.49f,0.49f,rubber,0,i<2?b.steer*0.47f:0,b.wheelRotation);
-        drawBusPart(b,x*1.17f,y,z,0.07f,0.17f,0.17f,XMFLOAT4(0.58f,0.60f,0.62f,1));
+        drawBusPart(b,x,y,z,0.20f,0.49f,0.49f,rubber,0,sim::wheelSteerAngle(b,i),b.wheelRotation);
+        drawBusPart(b,x*1.17f,y,z,0.07f,0.17f,0.17f,XMFLOAT4(0.58f,0.60f,0.62f,1),0,sim::wheelSteerAngle(b,i),b.wheelRotation);
     }
 }
 static void drawCity() {
