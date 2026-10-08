@@ -111,7 +111,7 @@ struct GpuMesh {
 };
 std::vector<GpuMesh> models;
 std::map<std::string,GLuint> textureCache;
-GLuint program=0,gridVao=0,gridVbo=0,boxVao=0,boxVbo=0;
+GLuint program=0,gridVao=0,gridVbo=0,boxVao=0,boxVbo=0,wheelVao=0,wheelVbo=0;
 GLint matrixUniform=-1,colorUniform=-1,useTextureUniform=-1;
 int viewportW=1,viewportH=1;
 int socketFd=-1;
@@ -197,7 +197,7 @@ void resetGpuHandles() {
             models[i].parts[j].ibo=0;models[i].parts[j].texture=0;
         }
     }
-    gridVao=gridVbo=boxVao=boxVbo=program=0;
+    gridVao=gridVbo=boxVao=boxVbo=wheelVao=wheelVbo=program=0;
 }
 void dropModelGpu() {
     for(size_t i=0;i<models.size();++i) {
@@ -632,6 +632,7 @@ Mat4 meshMatrix(const GpuMesh& mesh,const BusState& b,const Mat4& world) {
 }
 
 struct GlassQueue {size_t mesh,part;float distance;Mat4 matrix;};
+void drawFallbackDetails(const Mat4& pv,const BusState& bus);
 void drawBus(const Mat4& pv,const BusState& b,V3 camera) {
     const Mat4 world=busMatrix(b);
     std::vector<GlassQueue> glass;
@@ -660,6 +661,7 @@ void drawBus(const Mat4& pv,const BusState& b,V3 camera) {
         drawPart(models[glass[i].mesh],models[glass[i].mesh].parts[glass[i].part],glass[i].matrix);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    if(!imported)drawFallbackDetails(pv,b);
 }
 void initBox() {
     const float corners[8][3]={
@@ -703,6 +705,83 @@ void drawBox(const Mat4& pv,float x,float y,float z,float sx,float sy,float sz,
     glUniform1i(useTextureUniform,0);
     glBindVertexArray(boxVao);
     glDrawArrays(GL_TRIANGLES,0,36);
+}
+void initWheel() {
+    std::vector<float> triangles;
+    const int sections=20;
+    const float twoPi=6.283185307179586f;
+    for(int i=0;i<sections;++i) {
+        float a=twoPi*i/sections,b=twoPi*(i+1)/sections;
+        const float c0=cosf(a),s0=sinf(a),c1=cosf(b),s1=sinf(b);
+        const float points[12][3]={
+            {-.2f,c0,s0},{.2f,c0,s0},{.2f,c1,s1},
+            {-.2f,c0,s0},{.2f,c1,s1},{-.2f,c1,s1},
+            {-.2f,0,0},{-.2f,c1,s1},{-.2f,c0,s0},
+            { .2f,0,0},{ .2f,c0,s0},{ .2f,c1,s1}
+        };
+        for(int j=0;j<12;++j) {
+            triangles.push_back(points[j][0]);
+            triangles.push_back(points[j][1]);
+            triangles.push_back(points[j][2]);
+            triangles.push_back(0);
+            triangles.push_back(0);
+        }
+    }
+    glGenVertexArrays(1,&wheelVao);
+    glBindVertexArray(wheelVao);
+    glGenBuffers(1,&wheelVbo);
+    glBindBuffer(GL_ARRAY_BUFFER,wheelVbo);
+    glBufferData(GL_ARRAY_BUFFER,triangles.size()*sizeof(float),
+                 &triangles[0],GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,5*sizeof(float),0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,5*sizeof(float),
+                          (void*)(3*sizeof(float)));
+    glBindVertexArray(0);
+}
+void drawRelativeBox(const Mat4& pv,const Mat4& world,
+                     float x,float y,float z,float sx,float sy,float sz,
+                     float r,float g,float b) {
+    if(!boxVao)return;
+    const Mat4 m=mul(pv,mul(world,mul(translate(x,y,z),scale(sx,sy,sz))));
+    glUniformMatrix4fv(matrixUniform,1,GL_FALSE,m.m);
+    glUniform4f(colorUniform,r,g,b,1.0f);
+    glUniform1i(useTextureUniform,0);
+    glBindVertexArray(boxVao);
+    glDrawArrays(GL_TRIANGLES,0,36);
+}
+void drawFallbackDetails(const Mat4& pv,const BusState& bus) {
+    const Mat4 world=busMatrix(bus);
+    // Black front windscreen and animated side door, matching desktop shape.
+    drawRelativeBox(pv,world,0,1.20f,0,1.18f,0.54f,3.65f,
+                    0.075f,0.095f,0.14f);
+    drawRelativeBox(pv,world,0,0.95f,3.79f,1.12f,0.80f,0.055f,
+                    0.075f,0.095f,0.14f);
+    drawRelativeBox(pv,world,1.19f+bus.door*0.58f,0.12f,1.60f,
+                    0.06f,1.08f,0.76f,
+                    bus.door>0.5f?0.15f:0.86f,
+                    bus.door>0.5f?0.21f:0.30f,
+                    bus.door>0.5f?0.24f:0.15f);
+    for(int i=0;i<6;++i) {
+        const float x=sim::wheelOffsetX(i),z=sim::wheelOffsetZ(i);
+        const float travel=sim::visualTravel(bus,i);
+        const float y=-0.4f-(sim::SPRING_REST-travel);
+        const Mat4 wheel=mul(world,mul(translate(x,y,z),
+            mul(rotateY(sim::wheelSteerAngle(bus,i)),rotateX(bus.wheelRotation))));
+        if(wheelVao) {
+            const Mat4 tyre=mul(pv,mul(wheel,scale(1.0f,0.49f,0.49f)));
+            glUniformMatrix4fv(matrixUniform,1,GL_FALSE,tyre.m);
+            glUniform4f(colorUniform,0.035f,0.035f,0.04f,1);
+            glUniform1i(useTextureUniform,0);
+            glBindVertexArray(wheelVao);
+            glDrawArrays(GL_TRIANGLES,0,240);
+            const Mat4 hub=mul(pv,mul(wheel,scale(1.16f,0.17f,0.17f)));
+            glUniformMatrix4fv(matrixUniform,1,GL_FALSE,hub.m);
+            glUniform4f(colorUniform,0.58f,0.60f,0.62f,1);
+            glDrawArrays(GL_TRIANGLES,0,240);
+        }
+    }
 }
 void drawCity(const Mat4& pv,const BusState& focus) {
     // Same procedural map definition as the Windows client, with a mobile
@@ -944,6 +1023,7 @@ Java_com_dx11bus_android_BusActivity_nativeInitGL(JNIEnv* env,jclass) {
     if(models.empty())appendFallback();
     initGrid();
     initBox();
+    initWheel();
     prepareGpu(env);
     audio.start();
 }
