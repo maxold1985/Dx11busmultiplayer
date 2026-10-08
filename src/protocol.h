@@ -18,7 +18,7 @@ enum { INPUT_TOGGLE_DOOR=1, INPUT_GEAR_UP=2, INPUT_GEAR_DOWN=4 };
 struct BusState {
     uint32_t id;
     float x, y, z, heading, speed, steer, pitch, roll;
-    float wheelTravel[6], wheelRotation;
+    float wheelRotation;
     float rpm, door;
     int32_t gear;
     uint32_t passengers, nextStop;
@@ -29,6 +29,7 @@ struct NetPacket {
     BusState buses[MAX_BUSES];
 };
 #pragma pack(pop)
+static_assert(sizeof(NetPacket)<=1400,"UDP snapshot excede limite para evitar fragmentacao");
 
 
 #ifndef BUS_SIM_TEST
