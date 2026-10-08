@@ -36,7 +36,11 @@ Busca por texturas em `Texture/` do diretorio do onibus, junto das malhas e junt
 
 ## Animacoes parciais
 
-O parser reconhece `[newanim]`, `origin_trans`, `origin_rot_x/y/z`, `origin_from_mesh`, `anim_rot` e `anim_trans`. Uma ponte limitada mapeia variaveis **Wheel_Rotation_**, **Axle_Steering_0_**, **Axle_Suspension_**, **door_** e comandos de volante para estados ja simulados pelo jogo. Essas animacoes sao aproximadas, nao executam arquivos `.osc` do OMSI.
+O parser reconhece `[newanim]`, `origin_trans`, `origin_rot_x/y/z`, `origin_from_mesh`, `anim_rot` e `anim_trans`. Uma ponte limitada mapeia variaveis **Wheel_Rotation_**, **Axle_Steering_0_**, **Axle_Suspension_**, **door_** e comandos de volante para estados ja simulados pelo jogo.
+
+### Rodas de modelos 3DS
+
+O carregador 3DS reconhece objetos com nomes `wheel_fl`, `wheel_fr`, `wheel_rl2`, `wheel_rr2`, `wheel_rl` e `wheel_rr` (incluindo sufixos). Agrupa as pecas por roda, determina o centro pelo diametro do pneu e aplica rotacao ao redor do eixo X. As dianteiras estercam com a direcao do volante. A velocidade angular considera o raio real do modelo e a distancia percorrida calculada pelo servidor. Outros objetos permanecem estaticos. No GV1150.3ds os seis grupos foram identificados em testes locais; a renderizacao DX11 no Windows ainda precisa ser verificada. Essas animacoes sao aproximadas, nao executam arquivos `.osc` do OMSI.
 
 ## Limites (nao e compatibilidade integral de OMSI/OpenOMSI)
 
