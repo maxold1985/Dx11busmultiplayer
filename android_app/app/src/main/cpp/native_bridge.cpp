@@ -17,6 +17,9 @@
 #include "bus_script.hpp"
 #include "simulation.hpp"
 #include "android_audio.hpp"
+#ifdef BUS_ANDROID_HAS_ASSIMP
+#include "android_assimp.hpp"
+#endif
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,"Dx11BusAndroid",__VA_ARGS__)
 
@@ -212,6 +215,7 @@ bool exists(const std::string& p) {
 }
 std::string resolveTexture(const std::string& meshPath,const std::string& filename) {
     if(filename.empty())return "";
+    if(filename[0]=='/' && exists(filename))return filename;
     std::string root=modelRoot;
     std::string meshDir=omsi::directory(meshPath);
     const std::string candidates[]={
@@ -488,7 +492,17 @@ void appendFallback() {
 bool loadModelFile(const std::string& path) {
     std::vector<omsi::MeshEntry> entries;
     std::string error;
-    if(!omsi::readModelList(path,entries,&error)) {
+    const std::string lowerPath=omsi::lower(path);
+    const bool externalFormat=lowerPath.size()>4 && (
+        lowerPath.substr(lowerPath.size()-4)==".glb" ||
+        lowerPath.substr(lowerPath.size()-4)==".fbx" ||
+        lowerPath.substr(lowerPath.size()-4)==".obj" ||
+        (lowerPath.size()>5 && lowerPath.substr(lowerPath.size()-5)==".gltf"));
+    if(externalFormat) {
+        omsi::MeshEntry entry;
+        entry.path=path;
+        entries.push_back(entry);
+    } else if(!omsi::readModelList(path,entries,&error)) {
         modelStatus="Modelo invalido: "+error;
         return false;
     }
@@ -510,7 +524,18 @@ bool loadModelFile(const std::string& path) {
                     if(appendMesh(meshes[j],file,&entries[i]))++ok;else ++failed;
             } else ++failed;
         } else {
-            ++failed; // .x, FBX and GLB require an additional importer.
+#ifdef BUS_ANDROID_HAS_ASSIMP
+            std::vector<omsi::Mesh> importedModels;
+            if(androidimport::load(file,importedModels,error)) {
+                for(size_t m=0;m<importedModels.size();++m) {
+                    if(appendMesh(importedModels[m],file,&entries[i]))++ok;
+                    else ++failed;
+                }
+            } else ++failed;
+#else
+            ++failed;
+            error="Formato requer BUS_ANDROID_WITH_ASSIMP=ON";
+#endif
         }
     }
     if(models.empty()) {
