@@ -35,6 +35,32 @@ de cenarios 3D importados.
 - Nao ha simulacao independente de temperatura/desgaste dos pneus, ABS,
   distribuicao dinamica sofisticada de torque ou flexibilidade estrutural.
 
+## Modo de direcao OMSI 2 aproximado (tecla Ç)
+
+O cliente reconhece a tecla **Ç** usando o layout de teclado ativo do
+Windows (incluindo ABNT2). O botao na interface **Direcao OMSI: ON/OFF (Ç)**
+faz a mesma alternancia, com indicacao confirmada pelo servidor.
+
+O perfil e uma **aproximacao ajustavel**, nao uma reproducao de algoritmos
+internos do OMSI 2:
+
+- Modo classico (padrao): angulo maximo `0.53 / (1 + 0.0035*v*v)` rad,
+  esterco suavizado a taxa de `3.8/s`, resposta de guinada de `3.5/s`.
+- Modo OMSI aproximado: angulo maximo `0.70 / (1 + 0.0038*v*v)` rad;
+  o volante avanca gradualmente (1.8 unidades normalizadas por segundo
+  em repouso) e retorna mais rapido ao centro (2.3/s), com resposta
+  de guinada de `4.8/s`.
+- Os dois perfis preservam Ackermann, massa, suspensao raycast,
+  limite de aceleracao lateral e o bloqueio de tracao sem contato.
+- O servidor recebe a flag `INPUT_TOGGLE_OMSI_STEERING` (valor 32)
+  e replica `BusState::steeringMode` para todos os clientes.
+  **Cada jogador alterna apenas o seu proprio onibus.**
+- O comando `R` (reset para origem) preserva o modo de direcao escolhido.
+
+O protocolo de rede passa para `BUS3` com o novo campo serializado.
+**Recompile e reinicie o servidor e todos os clientes**, pois versoes
+anteriores nao sao compativeis com este protocolo.
+
 ## Parametros de ajuste
 
 | Constante / local | Valor inicial | O que altera |
@@ -64,7 +90,7 @@ build_mingw32.bat
 ctest --test-dir build_mingw32 --output-on-failure
 ```
 
-O alvo `suspension_steering_tests` verifica carroceria nivelada,
+Os alvos `suspension_steering_tests` e `omsi_steering_tests` verificam carroceria nivelada,
 compressao/amortecimento, raycasts sem colisao, angulos Ackermann,
 limite lateral, transferencia de carga na frenagem, marcha a re e perda
 de tracao sem contato. O build DX11 completo ainda depende do ambiente
