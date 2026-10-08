@@ -16,5 +16,6 @@ VOut VSMain(VIn input) {
 float4 PSMain(VOut input):SV_TARGET {
     float4 base=objectColor;
     if(materialFlags.x>0.5f)base*=diffuseTexture.Sample(diffuseSampler,input.uv);
+    clip(base.a - 0.025f);
     return base;
 }
