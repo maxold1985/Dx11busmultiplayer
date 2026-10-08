@@ -17,7 +17,7 @@ static void writeFile(const std::string& path, const char* contents) {
 	assert(file.good());
 }
 
-static bool near(float a, float b, float epsilon = 0.01f) {
+static bool approximatelyEqual(float a, float b, float epsilon = 0.01f) {
 	return std::fabs(a - b) < epsilon;
 }
 
@@ -116,16 +116,16 @@ int main() {
 	assert(scripts.hasManual);
 	assert(scripts.automatic.gears == 6);
 	assert(scripts.manual.gears == 6);
-	assert(near(scripts.automatic.ratios[0], 6.98f));
-	assert(near(scripts.automatic.ratios[5], 1.0f));
-	assert(near(scripts.automatic.differential, 3.666f));
-	assert(near(scripts.automatic.idleRpm, 550.0f));
-	assert(near(scripts.automatic.upRpm, 2170.0f));
-	assert(near(scripts.automatic.downRpm, 900.0f));
-	assert(near(scripts.automatic.shiftSeconds, 2.0f));
-	assert(near(scripts.manual.idleRpm, 640.0f));
-	assert(near(scripts.manual.shiftSeconds, 0.5f));
-	assert(near(scripts.automatic.vehicleMass, 17000.0f));
+	assert(approximatelyEqual(scripts.automatic.ratios[0], 6.98f));
+	assert(approximatelyEqual(scripts.automatic.ratios[5], 1.0f));
+	assert(approximatelyEqual(scripts.automatic.differential, 3.666f));
+	assert(approximatelyEqual(scripts.automatic.idleRpm, 550.0f));
+	assert(approximatelyEqual(scripts.automatic.upRpm, 2170.0f));
+	assert(approximatelyEqual(scripts.automatic.downRpm, 900.0f));
+	assert(approximatelyEqual(scripts.automatic.shiftSeconds, 2.0f));
+	assert(approximatelyEqual(scripts.manual.idleRpm, 640.0f));
+	assert(approximatelyEqual(scripts.manual.shiftSeconds, 0.5f));
+	assert(approximatelyEqual(scripts.automatic.vehicleMass, 17000.0f));
 	assert(!buscfg::safeRelative("../out.ogg"));
 	assert(!buscfg::safeRelative("C:/folder/file.ogg"));
 	assert(buscfg::safeRelative("O-400/Motor/idle.ogg"));
@@ -133,15 +133,15 @@ int main() {
 	assert(scripts.sounds.size() == 1);
 	assert(scripts.sounds[0].section == "sound1");
 	assert(scripts.sounds[0].idle);
-	assert(near(scripts.sounds[0].volume(0.5f), 0.5f));
-	assert(near(scripts.sounds[0].pitch(0.5f), 0.64f));
+	assert(approximatelyEqual(scripts.sounds[0].volume(0.5f), 0.5f));
+	assert(approximatelyEqual(scripts.sounds[0].pitch(0.5f), 0.64f));
 	assert(scripts.locateSound(scripts.sounds[0]).empty());
 
 	sim::Dynamics bus;
 	bus.b.z = -120.0f;
 	sim::setDriveProfiles(bus, scripts.automatic, scripts.manual);
 	assert(!bus.manualGear);
-	assert(near(bus.b.rpm, 550.0f));
+	assert(approximatelyEqual(bus.b.rpm, 550.0f));
 
 	sim::input(bus, 1.0f, 0.0f, 0.0f, 0);
 	for(int frame = 0; frame < 720; ++frame) {
@@ -167,7 +167,7 @@ int main() {
 	sim::input(bus, 0.0f, 0.0f, 0.0f, INPUT_RESET_ORIGIN);
 	assert(bus.driveAutomatic.valid);
 	assert(bus.driveManual.valid);
-	assert(near(bus.b.rpm, 550.0f));
+	assert(approximatelyEqual(bus.b.rpm, 550.0f));
 	assert(bus.b.gear == 1);
 
 	std::remove(descriptor.c_str());
