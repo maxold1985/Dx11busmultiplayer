@@ -165,12 +165,53 @@ inline bool object(const std::vector<uint8_t>& b,const Chunk& section,
         Chunk c;if(!next(b,at,section.end,c))return false;
         if(c.id!=0x4100)continue;
         Mesh mesh;
+        mesh.objectName=name;
         if(!triangleMesh(b,c,palette,mesh))return false;
         if(!mesh.vertices.empty()&&!mesh.triangles.empty())output.push_back(std::move(mesh));
     }
     return true;
 }
 } // namespace studio3ds
+// Wheels in OMSI-compatible 3DS exports are authored as separate objects.
+// Index layout matches sim::wheelOffset*: FL FR, RL2 RR2, RL RR.
+inline int wheelGroup3DS(const std::string& objectName) {
+    const std::string n=lower(objectName);
+    if(n.find("wheel_fl")!=std::string::npos)return 0;
+    if(n.find("wheel_fr")!=std::string::npos)return 1;
+    if(n.find("wheel_rl2")!=std::string::npos)return 2;
+    if(n.find("wheel_rr2")!=std::string::npos)return 3;
+    if(n.find("wheel_rl")!=std::string::npos)return 4;
+    if(n.find("wheel_rr")!=std::string::npos)return 5;
+    return -1;
+}
+struct WheelPivot3DS {
+    bool valid;
+    float x,y,z,radius;
+    WheelPivot3DS():valid(false),x(0),y(0),z(0),radius(0){}
+};
+inline void find3DSWheelPivots(const std::vector<Mesh>& meshes,WheelPivot3DS wheels[6]){
+    for(size_t i=0;i<meshes.size();i++){
+        const int index=wheelGroup3DS(meshes[i].objectName);
+        if(index<0 || meshes[i].vertices.empty())continue;
+        const std::vector<Vertex>& v=meshes[i].vertices;
+        float minX=v[0].x,maxX=v[0].x,minY=v[0].y,maxY=v[0].y;
+        float minZ=v[0].z,maxZ=v[0].z;
+        for(size_t j=1;j<v.size();j++){
+            minX=std::min(minX,v[j].x);maxX=std::max(maxX,v[j].x);
+            minY=std::min(minY,v[j].y);maxY=std::max(maxY,v[j].y);
+            minZ=std::min(minZ,v[j].z);maxZ=std::max(maxZ,v[j].z);
+        }
+        // Largest radial diameter selects the tire, not its decorative parts.
+        const float radius=std::max(maxY-minY,maxZ-minZ)*0.5f;
+        if(radius<0.05f || radius>3.0f || radius<=wheels[index].radius)continue;
+        WheelPivot3DS& wheel=wheels[index];
+        wheel.valid=true;
+        wheel.x=(minX+maxX)*0.5f;
+        wheel.y=(minY+maxY)*0.5f;
+        wheel.z=(minZ+maxZ)*0.5f;
+        wheel.radius=radius;
+    }
+}
 inline bool parse3DS(const std::vector<uint8_t>& data,std::vector<Mesh>& output,
                      std::string* error=0){
     output.clear();
