@@ -1,0 +1,17 @@
+name: Simulation tests
+on:
+  push:
+    branches: [mainn]
+  pull_request:
+    branches: [mainn]
+jobs:
+  physics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build_ci
+      - name: Compile tests
+        run: cmake --build build_ci --parallel 2
+      - name: Run tests
+        run: ctest --test-dir build_ci --output-on-failure
