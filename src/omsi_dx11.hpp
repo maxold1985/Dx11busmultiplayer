@@ -306,7 +306,7 @@ inline bool loadNative3DS(ID3D11Device* device,Bus& bus,const MeshEntry& entry){
     if(bus.report.size()<12000)bus.report+=stats;
     unsigned detected=0;
     for(int i=0;i<6;i++)if(wheelRigs[i].valid)++detected;
-    sprintf(stats,"Native 3DS wheels: %u/6 groups, %u animated parts (steer front, spin all)\\n",
+    sprintf(stats,"Native 3DS wheels: %u/6 groups, %u animated parts (steer front, spin all)\n",
             detected,animatedParts);
     if(bus.report.size()<12000)bus.report+=stats;
     if(drawable==0 && bus.report.size()<12000)
