@@ -24,7 +24,7 @@ inline float terrain(float x,float z) {
     }
     return 0.0f;
 }
-inline float wheelOffsetX(int wheel) {return (wheel&1)?1.04f:-1.04f;}
+inline float wheelOffsetX(int wheel) {return (wheel&1)?STEER_TRACK*0.5f:-STEER_TRACK*0.5f;}
 inline float wheelOffsetZ(int wheel) {return wheel<2?2.70f:(wheel<4?-1.20f:-2.65f);}
 
 inline Box building(int i,int j) {
@@ -224,12 +224,17 @@ inline void step(Dynamics& d,float dt) {
     b.steer+=(d.steering-b.steer)*clamp(frameDt*3.8f,0.0f,1.0f);
     b.steer=clamp(b.steer,-1.0f,1.0f);
     const float oldSpeed=b.speed;
-    const float traction=(b.door>0.5f)?0.0f:1.0f;
+    // Previous tick's raycast normal loads determine available tire grip.
+    // Airborne wheels cannot generate drive, braking or cornering force.
+    float contactLoad=0.0f;
+    for(int i=0;i<6;i++)if(d.wheelContact[i])contactLoad+=d.wheelForce[i];
+    const float grip=clamp(contactLoad/(BUS_MASS*GRAVITY),0.0f,1.0f);
+    const float traction=(b.door>0.5f)?0.0f:grip;
     const float acceleration=(d.throttle>=0?2.6f:1.8f);
     const float motor=d.throttle*acceleration*traction;
     const float speedAbs=std::fabs(b.speed);
     const float drag=0.0065f*b.speed*speedAbs;
-    const float braking=(d.brake*6.5f+0.11f)*(b.speed>0?1.0f:(b.speed<0?-1.0f:0.0f));
+    const float braking=(d.brake*6.5f*grip+0.11f)*(b.speed>0?1.0f:(b.speed<0?-1.0f:0.0f));
     b.speed+= (motor-drag-braking)*frameDt;
     if((oldSpeed>0&&b.speed<0&&d.throttle>=0) ||
        (oldSpeed<0&&b.speed>0&&d.throttle<=0))b.speed=0.0f;
@@ -242,7 +247,7 @@ inline void step(Dynamics& d,float dt) {
     const float centerAngle=b.steer*steerLimit(b.speed);
     const float understeer=1.0f+0.002f*b.speed*b.speed;
     float desiredYaw=b.speed*std::tan(centerAngle)/(STEER_WHEELBASE*understeer);
-    const float yawGrip=MAX_LATERAL_ACCEL/std::max(std::fabs(b.speed),1.0f);
+    const float yawGrip=MAX_LATERAL_ACCEL*grip/std::max(std::fabs(b.speed),1.0f);
     desiredYaw=clamp(desiredYaw,-yawGrip,yawGrip);
     d.yawRate+=(desiredYaw-d.yawRate)*clamp(frameDt*3.5f,0.0f,1.0f);
     d.yawRate=clamp(d.yawRate,-yawGrip,yawGrip);
