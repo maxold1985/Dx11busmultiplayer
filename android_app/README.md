@@ -13,9 +13,12 @@ não foram substituídos. O Android mantém o protocolo multiplayer BUS4
 3. Configure **Gradle 8.7**; se não existir o Gradle Wrapper, use a
    distribuição local do Gradle ou execute
    `gradle wrapper --gradle-version 8.7` nesta pasta.
-4. Selecione **Build > Build APK(s)**, variante `debug`.
+4. Selecione **Build > Build APK(s)**, variante `debug`, ou execute
+   `build_apk.bat` na pasta `android_app` com Gradle no PATH.
 5. O arquivo de saída é `app/build/outputs/apk/debug/app-debug.apk`.
-6. Instale o APK em dispositivo Android **arm64-v8a**, API 26 ou superior.
+6. Instale o APK com o Android Studio ou execute `install_apk.bat`
+   com o tablet conectado via ADB. Requer dispositivo **arm64-v8a**,
+   API 26 ou superior.
    A visualização requer GPU com OpenGL ES 3.0.
 
 Também existe o workflow
@@ -32,6 +35,9 @@ e binários Android de terminal. **Não gera o APK gráfico.**
 - **PASTA OMSI**: escolha a pasta completa do ônibus usando o seletor do Android.
   O aplicativo copia os arquivos para armazenamento privado preservando
   as subpastas de malhas, scripts, sons e texturas.
+- **ZIP OMSI**: escolha diretamente o ZIP do mod. O aplicativo extrai os
+  arquivos dentro do armazenamento privado com limites de tamanho e
+  verificação de caminhos para evitar *zip slip*.
 - **MODELO** e **SCRIPT**: escolhem arquivo isolado. Para arquivos que
   referenciam outros, use a importação da pasta inteira.
 - **MODELOS MOD** e **SCRIPTS MOD**: permitem escolher uma variante dentre
@@ -40,6 +46,9 @@ e binários Android de terminal. **Não gera o APK gráfico.**
   O endereço fica salvo para a próxima utilização.
 - **CAMERA**: alterna câmera externa/cabine. Arraste na tela para
   orbitar, faça pinça para zoom ou pressione ZOOM + / ZOOM -.
+- **VIDRO COR** e **VIDRO FACES**: diagnósticos de textura e culling;
+  correspondem a F6 e F7 no Windows.
+- **DESCONECTAR**: encerra o socket UDP e retorna à física offline.
 - **ACELERAR, RE, ESQUERDA, DIREITA, FREIO, EMBREAGEM**:
   mantenha o botão pressionado.
 - **PORTA, MARCHA +, MARCHA -, AUTO, DIRECAO OMSI, RESET**:
@@ -49,7 +58,9 @@ e binários Android de terminal. **Não gera o APK gráfico.**
 
 Teclado físico: W/S acelerador/ré, A/D direção, Espaço freio,
 Tab embreagem, E portas, Q/Z marchas, G automático, R reset,
-H buzina, B pedido de parada e F1 câmera.
+H buzina, B pedido de parada, F1 câmera, F6/F7 diagnóstico de vidros.
+Gamepad Bluetooth: direcional analógico esquerdo para dirigir,
+gatilho esquerdo para frear, botão A portas e R1 aumentar marcha.
 
 Sem servidor, o aplicativo executa uma **simulação local offline** com
 a física compartilhada. Quando conectado, o servidor é autoritativo:
