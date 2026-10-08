@@ -682,53 +682,121 @@ static void browseOmsiModel(HWND hwnd){
     }
 }
 
-static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
-    if(msg==WM_DESTROY){running=false;PostQuitMessage(0);return 0;}
-    if(msg==WM_RBUTTONDOWN){
-        orbitDragging=true;
-        orbitLast.x=GET_X_LPARAM(l);orbitLast.y=GET_Y_LPARAM(l);
-        SetCapture(hwnd);
-        return 0;
-    }
-    if(msg==WM_MOUSEMOVE && orbitDragging){
-        const int mx=GET_X_LPARAM(l),my=GET_Y_LPARAM(l);
-        orbitYaw+=(mx-orbitLast.x)*0.006f;
-        orbitPitch=sim::clamp(orbitPitch+(my-orbitLast.y)*0.005f,-0.18f,1.35f);
-        orbitLast.x=mx;orbitLast.y=my;
-        return 0;
-    }
-    if(msg==WM_RBUTTONUP){
-        orbitDragging=false;
-        if(GetCapture()==hwnd)ReleaseCapture();
-        return 0;
-    }
-    if(msg==WM_CAPTURECHANGED){orbitDragging=false;return 0;}
-    if(msg==WM_MOUSEWHEEL){
-        const int delta=GET_WHEEL_DELTA_WPARAM(w);
-        orbitDistance=sim::clamp(orbitDistance*(delta>0?0.88f:1.12f),4.0f,45.0f);
-        return 0;
-    }
-    if(msg==WM_KEYDOWN){
-        if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}
-        if(w==VK_F1 && !((l>>30)&1)){cockpit=!cockpit;return 0;}
-		if(w=='R' && !((l>>30)&1)) {
+static LRESULT CALLBACK windowProcedure(
+	HWND hwnd,
+	UINT message,
+	WPARAM w,
+	LPARAM l
+) {
+	if(message == WM_DESTROY) {
+		running = false;
+		PostQuitMessage(0);
+		return 0;
+	}
+
+	if(message == WM_RBUTTONDOWN) {
+		orbitDragging = true;
+		orbitLast.x = GET_X_LPARAM(l);
+		orbitLast.y = GET_Y_LPARAM(l);
+		SetCapture(hwnd);
+		return 0;
+	}
+
+	if(message == WM_MOUSEMOVE && orbitDragging) {
+		const int mx = GET_X_LPARAM(l);
+		const int my = GET_Y_LPARAM(l);
+
+		orbitYaw += (mx - orbitLast.x) * 0.006f;
+		orbitPitch = sim::clamp(
+			orbitPitch + (my - orbitLast.y) * 0.005f,
+			-0.18f,
+			1.35f
+		);
+
+		orbitLast.x = mx;
+		orbitLast.y = my;
+		return 0;
+	}
+
+	if(message == WM_RBUTTONUP) {
+		orbitDragging = false;
+
+		if(GetCapture() == hwnd) {
+			ReleaseCapture();
+		}
+
+		return 0;
+	}
+
+	if(message == WM_CAPTURECHANGED) {
+		orbitDragging = false;
+		return 0;
+	}
+
+	if(message == WM_MOUSEWHEEL) {
+		const int delta = GET_WHEEL_DELTA_WPARAM(w);
+		const float zoomFactor = delta > 0 ? 0.88f : 1.12f;
+
+		orbitDistance = sim::clamp(
+			orbitDistance * zoomFactor,
+			4.0f,
+			45.0f
+		);
+		return 0;
+	}
+
+	if(message == WM_KEYDOWN) {
+		const bool firstKeyDown = ((l >> 30) & 1) == 0;
+
+		if(w == VK_ESCAPE) {
+			DestroyWindow(hwnd);
+			return 0;
+		}
+
+		if(w == VK_F1 && firstKeyDown) {
+			cockpit = !cockpit;
+			return 0;
+		}
+
+		if(w == 'R' && firstKeyDown) {
 			requestOriginReset();
 			return 0;
 		}
-    }
-    if(msg==WM_COMMAND && LOWORD(w)==103){browseOmsiModel(hwnd);return 0;}
-	if(msg == WM_COMMAND && LOWORD(w) == 104) {
-		requestOriginReset();
-		return 0;
 	}
-    if(msg==WM_COMMAND && LOWORD(w)==102){
-        char ipv4[80]={};GetWindowTextA(ipInput,ipv4,80);
-        if(!connectTo(ipv4))
-            MessageBoxA(hwnd,"Informe um endereco IPv4 valido, ex.: 127.0.0.1","Conexao",MB_OK|MB_ICONWARNING);
-        return 0;
-    }
-    return DefWindowProcA(hwnd,msg,w,l);
+
+	if(message == WM_COMMAND) {
+		const int command = LOWORD(w);
+
+		if(command == 103) {
+			browseOmsiModel(hwnd);
+			return 0;
+		}
+
+		if(command == 104) {
+			requestOriginReset();
+			return 0;
+		}
+
+		if(command == 102) {
+			char ipv4[80] = {};
+			GetWindowTextA(ipInput, ipv4, sizeof(ipv4));
+
+			if(!connectTo(ipv4)) {
+				MessageBoxA(
+					hwnd,
+					"Informe um endereco IPv4 valido, ex.: 127.0.0.1",
+					"Conexao",
+					MB_OK | MB_ICONWARNING
+				);
+			}
+
+			return 0;
+		}
+	}
+
+	return DefWindowProcA(hwnd, message, w, l);
 }
+
 int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
     CoInitializeEx(0,COINIT_MULTITHREADED);
     WNDCLASSA wc={};wc.lpfnWndProc=windowProcedure;wc.hInstance=instance;
