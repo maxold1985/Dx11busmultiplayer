@@ -211,8 +211,8 @@ inline bool upload(ID3D11Device* device,Bus& bus,const Mesh& mesh,
     bus.meshes.push_back(gpu);return true;
 }
 #ifdef BUS_HAS_ASSIMP
-inline bool loadDirectXModel(ID3D11Device* device,Bus& bus,const MeshEntry& entry) {
-    // Arquivos .x de alguns addons OMSI sao carregados apenas com Assimp habilitado.
+inline bool loadAssimpMesh(ID3D11Device* device,Bus& bus,const MeshEntry& entry) {
+    // Importa .x e .3ds diretamente com Assimp i686 habilitado.
     Assimp::Importer importer;
     const aiScene* scene=importer.ReadFile(entry.path,
         aiProcess_Triangulate|aiProcess_PreTransformVertices|
@@ -265,13 +265,14 @@ inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
     if(!readModelList(bus.source,entries,&err)){bus.report=err;return false;}
     for(size_t i=0;i<entries.size();i++){
         std::string name=lower(entries[i].path);
-        if(name.size()>=2 && name.substr(name.size()-2)==".x") {
+        if((name.size()>=2 && name.substr(name.size()-2)==".x") ||
+           (name.size()>=4 && name.substr(name.size()-4)==".3ds")) {
 #ifdef BUS_HAS_ASSIMP
-            if(loadDirectXModel(device,bus,entries[i]))++bus.imported;
-            else {++bus.missing;if(bus.report.size()<1200)bus.report+="Failed .x "+entries[i].path+"\n";}
+            if(loadAssimpMesh(device,bus,entries[i]))++bus.imported;
+            else {++bus.missing;if(bus.report.size()<1200)bus.report+="Failed Assimp mesh "+entries[i].path+"\n";}
 #else
             ++bus.missing;
-            if(bus.report.size()<1200)bus.report+=".x requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
+            if(bus.report.size()<1200)bus.report+=".x/.3ds requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
 #endif
             continue;
         }
