@@ -170,17 +170,68 @@ inline RayHit raycastGround(float x,float originY,float z,float maxLength) {
     return r;
 }
 inline float steerLimit(float signedSpeed) {
-    const float v=std::fabs(signedSpeed);
-    return 0.53f/(1.0f+0.0035f*v*v);
+	const float speed = std::fabs(signedSpeed);
+	return 0.53f / (1.0f + 0.0035f * speed * speed);
 }
-inline float wheelSteerAngle(const BusState& b,int wheel) {
-    if(wheel<0||wheel>=2)return 0.0f;
-    const float base=clamp(b.steer,-1.0f,1.0f)*steerLimit(b.speed);
-    if(std::fabs(base)<0.00001f)return 0.0f;
-    const float radius=STEER_WHEELBASE/std::tan(std::fabs(base));
-    const float side=base>0?1.0f:-1.0f;
-    const float atRadius=std::max(0.5f,radius-side*wheelOffsetX(wheel));
-    return side*std::atan(STEER_WHEELBASE/atRadius);
+
+// Approximate OMSI 2 keyboard handling, not a reproduction of OMSI's code.
+// Allows more wheel lock for low-speed parking, with speed-sensitive steering.
+inline float steerLimit(const BusState& bus) {
+	if(bus.steeringMode == STEERING_OMSI_APPROX) {
+		const float speed = std::fabs(bus.speed);
+		return 0.70f / (1.0f + 0.0038f * speed * speed);
+	}
+
+	return steerLimit(bus.speed);
+}
+
+inline float advanceSteering(
+	const BusState& bus,
+	float current,
+	float target,
+	float dt
+) {
+	if(bus.steeringMode == STEERING_OMSI_APPROX) {
+		const float speed = std::fabs(bus.speed);
+		const bool returningToCenter = std::fabs(target) < 0.01f;
+		const float baseRate = returningToCenter ? 2.30f : 1.80f;
+		const float rate = baseRate / (1.0f + 0.018f * speed);
+		const float maximumChange = rate * dt;
+		const float difference = clamp(
+			target - current,
+			-maximumChange,
+			maximumChange
+		);
+
+		return clamp(current + difference, -1.0f, 1.0f);
+	}
+
+	const float responsiveness = clamp(dt * 3.8f, 0.0f, 1.0f);
+	return clamp(
+		current + (target - current) * responsiveness,
+		-1.0f,
+		1.0f
+	);
+}
+
+inline float wheelSteerAngle(const BusState& bus, int wheel) {
+	if(wheel < 0 || wheel >= 2) {
+		return 0.0f;
+	}
+
+	const float base = clamp(bus.steer, -1.0f, 1.0f) * steerLimit(bus);
+	if(std::fabs(base) < 0.00001f) {
+		return 0.0f;
+	}
+
+	const float radius = STEER_WHEELBASE / std::tan(std::fabs(base));
+	const float side = base > 0.0f ? 1.0f : -1.0f;
+	const float insideRadius = std::max(
+		0.5f,
+		radius - side * wheelOffsetX(wheel)
+	);
+
+	return side * std::atan(STEER_WHEELBASE / insideRadius);
 }
 inline float sprungWeight(int wheel) {
     // Front axle 43%, middle 24%, rearmost 33%; their weighted lever arms
@@ -233,8 +284,11 @@ struct Dynamics {
 // Reset executed by the authoritative server; preserve the network identity.
 inline void resetOrigin(Dynamics& dynamics) {
 	const uint32_t savedId = dynamics.b.id;
+	const uint32_t savedSteeringMode = dynamics.b.steeringMode;
+
 	dynamics = Dynamics();
 	dynamics.b.id = savedId;
+	dynamics.b.steeringMode = savedSteeringMode;
 	dynamics.b.x = 0.0f;
 	dynamics.b.z = 0.0f;
 	dynamics.b.heading = 0.0f;
@@ -257,6 +311,14 @@ inline void input(
 		resetOrigin(d);
 		d.lastFlags = flags;
 		return;
+	}
+
+	if((pressed & INPUT_TOGGLE_OMSI_STEERING) != 0) {
+		if(d.b.steeringMode == STEERING_OMSI_APPROX) {
+			d.b.steeringMode = STEERING_CLASSIC;
+		} else {
+			d.b.steeringMode = STEERING_OMSI_APPROX;
+		}
 	}
 
 	if((pressed & INPUT_TOGGLE_DOOR) != 0) {
@@ -344,8 +406,7 @@ inline void step(Dynamics& d,float dt) {
     // Prevent explosive integration if the host experiences a frame stall.
     const float frameDt=clamp(dt,0.0f,1.0f/30.0f);
     BusState& b=d.b;
-    b.steer+=(d.steering-b.steer)*clamp(frameDt*3.8f,0.0f,1.0f);
-    b.steer=clamp(b.steer,-1.0f,1.0f);
+	b.steer = advanceSteering(b, b.steer, d.steering, frameDt);
     const float oldSpeed=b.speed;
     // Previous tick's raycast normal loads determine available tire grip.
     // Airborne wheels cannot generate drive, braking or cornering force.
@@ -367,13 +428,23 @@ inline void step(Dynamics& d,float dt) {
 
     // Relaxed single-track yaw response: slower bus steering and realistic
     // high-speed understeer, with grip-limited lateral acceleration.
-    const float centerAngle=b.steer*steerLimit(b.speed);
-    const float understeer=1.0f+0.002f*b.speed*b.speed;
-    float desiredYaw=b.speed*std::tan(centerAngle)/(STEER_WHEELBASE*understeer);
-    const float yawGrip=MAX_LATERAL_ACCEL*grip/std::max(std::fabs(b.speed),1.0f);
-    desiredYaw=clamp(desiredYaw,-yawGrip,yawGrip);
-    d.yawRate+=(desiredYaw-d.yawRate)*clamp(frameDt*3.5f,0.0f,1.0f);
-    d.yawRate=clamp(d.yawRate,-yawGrip,yawGrip);
+	const bool omsiMode = b.steeringMode == STEERING_OMSI_APPROX;
+	const float centerAngle = b.steer * steerLimit(b);
+	const float speedSquared = b.speed * b.speed;
+	const float understeerRate = omsiMode ? 0.0014f : 0.0020f;
+	const float understeer = 1.0f + understeerRate * speedSquared;
+	float desiredYaw = b.speed * std::tan(centerAngle) /
+		(STEER_WHEELBASE * understeer);
+
+	const float yawGrip = MAX_LATERAL_ACCEL * grip /
+		std::max(std::fabs(b.speed), 1.0f);
+
+	desiredYaw = clamp(desiredYaw, -yawGrip, yawGrip);
+
+	const float yawResponse = omsiMode ? 4.8f : 3.5f;
+	d.yawRate += (desiredYaw - d.yawRate) *
+		clamp(frameDt * yawResponse, 0.0f, 1.0f);
+	d.yawRate = clamp(d.yawRate, -yawGrip, yawGrip);
     d.lateralSpeed+=(-4.5f*d.lateralSpeed-b.speed*d.yawRate)*frameDt;
     d.lateralSpeed=clamp(d.lateralSpeed,-2.0f,2.0f);
     b.heading+=d.yawRate*frameDt;
