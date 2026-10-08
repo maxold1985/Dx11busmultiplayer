@@ -11,6 +11,8 @@ inline XMVECTOR XMVectorSet(float x,float y,float z,float w){XMVECTOR a={x,y,z,w
 inline XMMATRIX identity(){XMMATRIX a={};for(int i=0;i<4;++i)a.m[i][i]=1;return a;}
 inline XMMATRIX operator*(const XMMATRIX& a,const XMMATRIX& b){XMMATRIX r={};for(int i=0;i<4;++i)for(int j=0;j<4;++j)for(int k=0;k<4;++k)r.m[i][j]+=a.m[i][k]*b.m[k][j];return r;}
 inline XMMATRIX XMMatrixScaling(float x,float y,float z){XMMATRIX a=identity();a.m[0][0]=x;a.m[1][1]=y;a.m[2][2]=z;return a;}
+inline XMMATRIX XMMatrixRotationX(float a){XMMATRIX r=identity();float c=cosf(a),s=sinf(a);r.m[1][1]=c;r.m[1][2]=s;r.m[2][1]=-s;r.m[2][2]=c;return r;}
+inline XMMATRIX XMMatrixRotationZ(float a){XMMATRIX r=identity();float c=cosf(a),s=sinf(a);r.m[0][0]=c;r.m[0][1]=s;r.m[1][0]=-s;r.m[1][1]=c;return r;}
 inline XMMATRIX XMMatrixRotationY(float a){XMMATRIX r=identity();float c=cosf(a),s=sinf(a);r.m[0][0]=c;r.m[0][2]=-s;r.m[2][0]=s;r.m[2][2]=c;return r;}
 inline XMMATRIX XMMatrixTranslation(float x,float y,float z){XMMATRIX r=identity();r.m[3][0]=x;r.m[3][1]=y;r.m[3][2]=z;return r;}
 inline XMVECTOR sub(XMVECTOR a,XMVECTOR b){return XMVectorSet(a.x-b.x,a.y-b.y,a.z-b.z,0);}
