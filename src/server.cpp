@@ -166,6 +166,11 @@ int main() {
 				(packet.flags & INPUT_RESET_ORIGIN) != 0 &&
 				(player.physics.lastFlags & INPUT_RESET_ORIGIN) == 0;
 
+			const bool omsiSteeringToggle =
+				(packet.flags & INPUT_TOGGLE_OMSI_STEERING) != 0 &&
+				(player.physics.lastFlags & INPUT_TOGGLE_OMSI_STEERING) == 0 &&
+				!originReset;
+
 			sim::input(
 				player.physics,
 				packet.throttle,
@@ -176,8 +181,17 @@ int main() {
 
 			if(originReset) {
 				printf(
-				"Reset origem: ID %u -> X=0 Z=0, velocidade=0\n",
-				player.physics.b.id
+					"Reset origem: ID %u -> X=0 Z=0, velocidade=0\n",
+					player.physics.b.id
+				);
+			}
+
+			if(omsiSteeringToggle) {
+				printf(
+					"Direcao ID %u: %s\n",
+					player.physics.b.id,
+					player.physics.b.steeringMode == STEERING_OMSI_APPROX ?
+						"OMSI 2 aproximado" : "Classica"
 				);
 			}
 
