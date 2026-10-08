@@ -36,6 +36,7 @@ static ID3D11InputLayout* layout=0;
 static ID3D11Buffer* cubeVB=0;
 static ID3D11Buffer* constants=0;
 static ID3D11SamplerState* sampler=0;
+static ID3D11BlendState* omsiBlend=0;
 static ID3D11ShaderResourceView* roadTexture=0;
 static ID3D11ShaderResourceView* busTexture=0;
 static ModelAsset busModel;
@@ -151,6 +152,16 @@ static bool initializeGraphics(HWND hwnd) {
     sd.AddressU=D3D11_TEXTURE_ADDRESS_WRAP;sd.AddressV=D3D11_TEXTURE_ADDRESS_WRAP;
     sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
     if(FAILED(device->CreateSamplerState(&sd,&sampler)))return false;
+    D3D11_BLEND_DESC blend={};
+    blend.RenderTarget[0].BlendEnable=TRUE;
+    blend.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;
+    blend.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;
+    blend.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;
+    blend.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_ZERO;
+    blend.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+    if(FAILED(device->CreateBlendState(&blend,&omsiBlend)))return false;
     roadTexture=makeChecker(85,85,85);
     busTexture=makeChecker(230,232,235);
     // Arquivos opcionais. Em GLB/FBX, Assimp deve estar habilitado no CMake.
@@ -166,7 +177,7 @@ static void shutdownGraphics(){
     if(context)context->ClearState();
     busModel.clear();
     omsiBus.clear();
-    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);
+    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);releaseObj(omsiBlend);
     releaseObj(constants);releaseObj(cubeVB);releaseObj(layout);
     releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);
     releaseObj(depthTexture);releaseObj(target);releaseObj(swapChain);
@@ -214,6 +225,8 @@ static void drawAssimpBus(const BusState& b,const XMFLOAT4& tint) {
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
 }
 static void drawOmsiBus(const BusState& b){
+    const float factor[]={0,0,0,0};
+    context->OMSetBlendState(omsiBlend,factor,0xFFFFFFFFu);
     // OMSI exporta vertices em X-direita, Y-cima, Z-frente.
     // O centro da dinamica do DX11Bus e 1.6 m acima do nivel das rodas.
     XMMATRIX placement=XMMatrixRotationZ(b.roll)*
@@ -232,6 +245,7 @@ static void drawOmsiBus(const BusState& b){
         }
     }
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
+    context->OMSetBlendState(0,0,0xFFFFFFFFu);
 }
 
 static void drawBus(const BusState& b,bool mine) {
