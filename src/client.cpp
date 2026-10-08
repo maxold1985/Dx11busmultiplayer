@@ -219,7 +219,7 @@ static void drawBus(const BusState& b,bool mine) {
     // Mesmo com modelo GLB, as seis rodas fisicas sao renderizadas independentemente.
     for(int i=0;i<6;i++){
         float x=sim::wheelOffsetX(i),z=sim::wheelOffsetZ(i);
-        float compression=b.wheelTravel[i];
+        float compression=sim::visualTravel(b,i);
         float y=-0.4f-(sim::SPRING_REST-compression);
         drawBusPart(b,x,y,z,0.20f,0.49f,0.49f,rubber,0,i<2?b.steer*0.47f:0,b.wheelRotation);
         drawBusPart(b,x*1.17f,y,z,0.07f,0.17f,0.17f,XMFLOAT4(0.58f,0.60f,0.62f,1));
@@ -271,7 +271,6 @@ static BusState interpolated(const BusState& a,const BusState& b,float t) {
     r.pitch=a.pitch+(b.pitch-a.pitch)*t;
     r.door=a.door+(b.door-a.door)*t;
     r.wheelRotation=a.wheelRotation+(b.wheelRotation-a.wheelRotation)*t;
-    for(int i=0;i<6;i++)r.wheelTravel[i]=a.wheelTravel[i]+(b.wheelTravel[i]-a.wheelTravel[i])*t;
     return r;
 }
 static BusState currentBus(uint32_t id,float alpha) {
