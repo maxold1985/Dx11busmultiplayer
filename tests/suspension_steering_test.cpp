@@ -74,7 +74,20 @@ static void reverseYaw(){
     frames(d,60);
     assert(d.b.heading<0.0f);
 }
+static void airborneNoGrip(){
+    sim::Dynamics airborne,grounded;
+    airborne.b.y=8.0f;
+    airborne.b.z=-110.0f;
+    grounded.b.z=-110.0f;
+    sim::input(airborne,1.0f,0.6f,0,0);
+    sim::input(grounded,1.0f,0.6f,0,0);
+    frames(airborne,45);
+    frames(grounded,45);
+    assert(!airborne.wheelContact[0]);
+    assert(grounded.b.speed>airborne.b.speed+1.0f);
+}
 int main(){
+    airborneNoGrip();
     parkedAndLevel();
     compressionAndRays();
     steeringAndBraking();
