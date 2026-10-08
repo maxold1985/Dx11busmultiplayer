@@ -1,18 +1,21 @@
 #define _WIN32_WINNT 0x0601
 #include "protocol.h"
+#include "simulation.hpp"
+#include "math_compat.h"
+#include "audio_motor.hpp"
+#include "model_assimp.hpp"
 #include <windows.h>
 #include <d3d11.h>
-#include "math_compat.h"
 #include <stdio.h>
 #include <vector>
-#include <math.h>
 #include <string>
-#include <cstring>
+#include <math.h>
+#include <algorithm>
+#include <string.h>
 using namespace DirectX;
 
-struct SceneConstants { XMFLOAT4X4 worldViewProjection; XMFLOAT4 color; };
-struct Vertex { float x,y,z; };
-static HWND windowHandle=0;
+struct SceneConstants {XMFLOAT4X4 transform;XMFLOAT4 color;XMFLOAT4 flags;};
+static HWND windowHandle=0,ipInput=0,connectButton=0;
 static ID3D11Device* device=0;
 static ID3D11DeviceContext* context=0;
 static IDXGISwapChain* swapChain=0;
@@ -21,202 +24,416 @@ static ID3D11DepthStencilView* depthView=0;
 static ID3D11Texture2D* depthTexture=0;
 static ID3D11VertexShader* vertexShader=0;
 static ID3D11PixelShader* pixelShader=0;
-static ID3D11InputLayout* vertexLayout=0;
+static ID3D11InputLayout* layout=0;
 static ID3D11Buffer* cubeVB=0;
-static ID3D11Buffer* constantBuffer=0;
-static SOCKET udp=INVALID_SOCKET;
+static ID3D11Buffer* constants=0;
+static ID3D11SamplerState* sampler=0;
+static ID3D11ShaderResourceView* roadTexture=0;
+static ID3D11ShaderResourceView* busTexture=0;
+static ModelAsset busModel;
+static bool useModel=false,connected=false,running=true,cockpit=false;
+static SOCKET socketUdp=INVALID_SOCKET;
 static sockaddr_in serverAddress={};
-static BusState allBuses[MAX_BUSES]={};
-static uint32_t busCount=0,myId=0;
-static int screenWidth=1280,screenHeight=720;
-static bool running=true;
+static uint32_t myId=0,lastTick=0;
+static const int WIDTH=1280,HEIGHT=720;
+static XMMATRIX cameraMatrix;
+static MotorAudio motor;
+struct Snapshot {
+    BusState buses[MAX_BUSES];
+    uint32_t count;
+    DWORD received;
+    Snapshot():count(0),received(0){memset(buses,0,sizeof(buses));}
+};
+static Snapshot earlier,latest;
+static bool gotSnapshot=false;
+static DWORD lastHud=0,lastNetwork=0;
 
-template<class T> static void releaseObj(T*& p) { if(p) {p->Release();p=0;} }
-static bool readBinary(const char* path,std::vector<char>& result) {
-    FILE* f=fopen(path,"rb");
+template<class T> static void releaseObj(T*& obj){if(obj){obj->Release();obj=0;}}
+static bool readBinary(const char* name,std::vector<char>& out) {
+    FILE* f=fopen(name,"rb");
     if(!f) {
-        char executablePath[MAX_PATH]={};
-        GetModuleFileNameA(0,executablePath,MAX_PATH);
-        char* slash=strrchr(executablePath,'\\');
-        if(slash) {*(slash+1)=0;strncat(executablePath,path,MAX_PATH-strlen(executablePath)-1);f=fopen(executablePath,"rb");}
+        char path[MAX_PATH]={};GetModuleFileNameA(0,path,MAX_PATH);
+        char* slash=strrchr(path,'\\');
+        if(slash){*(slash+1)=0;strncat(path,name,MAX_PATH-strlen(path)-1);f=fopen(path,"rb");}
     }
     if(!f)return false;
     fseek(f,0,SEEK_END);long size=ftell(f);rewind(f);
-    if(size<=0) {fclose(f);return false;}
-    result.resize(size_t(size)); bool ok=fread(&result[0],1,size_t(size),f)==size_t(size);
+    if(size<=0){fclose(f);return false;}
+    out.resize((size_t)size);
+    bool ok=fread(&out[0],1,(size_t)size,f)==(size_t)size;
     fclose(f);return ok;
 }
+static std::string applicationDirectory(){
+    char path[MAX_PATH]={};GetModuleFileNameA(0,path,MAX_PATH);
+    char* last=strrchr(path,'\\');if(last)last[1]=0;
+    return path;
+}
+static ID3D11ShaderResourceView* makeChecker(unsigned char r,unsigned char g,unsigned char b) {
+    const UINT w=64,h=64;std::vector<unsigned char> pixels(w*h*4);
+    for(UINT y=0;y<h;y++)for(UINT x=0;x<w;x++) {
+        bool stripe=(x/8+y/8)%2==0;
+        unsigned char v=stripe?255:210;
+        size_t k=(size_t(y)*w+x)*4;
+        pixels[k]=(unsigned char)(r*v/255);pixels[k+1]=(unsigned char)(g*v/255);
+        pixels[k+2]=(unsigned char)(b*v/255);pixels[k+3]=255;
+    }
+    return createTextureFromRGBA(device,&pixels[0],w,h);
+}
 static bool initializeGraphics(HWND hwnd) {
-    DXGI_SWAP_CHAIN_DESC desc={};desc.BufferCount=1;
-    desc.BufferDesc.Width=screenWidth;desc.BufferDesc.Height=screenHeight;
-    desc.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;desc.OutputWindow=hwnd;
-    desc.SampleDesc.Count=1;desc.Windowed=TRUE;desc.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;
-    D3D_FEATURE_LEVEL requested[]={D3D_FEATURE_LEVEL_11_0,D3D_FEATURE_LEVEL_10_1,D3D_FEATURE_LEVEL_10_0};
-    D3D_FEATURE_LEVEL selected;
-    HRESULT hr=D3D11CreateDeviceAndSwapChain(0,D3D_DRIVER_TYPE_HARDWARE,0,0,requested,3,D3D11_SDK_VERSION,&desc,&swapChain,&device,&selected,&context);
+    DXGI_SWAP_CHAIN_DESC sc={};sc.BufferCount=1;
+    sc.BufferDesc.Width=WIDTH;sc.BufferDesc.Height=HEIGHT;
+    sc.BufferDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    sc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;sc.OutputWindow=hwnd;
+    sc.SampleDesc.Count=1;sc.Windowed=TRUE;
+    sc.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;
+    const D3D_FEATURE_LEVEL features[]={D3D_FEATURE_LEVEL_11_0,D3D_FEATURE_LEVEL_10_1,D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL granted=D3D_FEATURE_LEVEL_10_0;
+    HRESULT hr=D3D11CreateDeviceAndSwapChain(0,D3D_DRIVER_TYPE_HARDWARE,0,0,
+        features,3,D3D11_SDK_VERSION,&sc,&swapChain,&device,&granted,&context);
     if(FAILED(hr))return false;
-    ID3D11Texture2D* backBuffer=0;
-    hr=swapChain->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&backBuffer);
+    ID3D11Texture2D* back=0;
+    if(FAILED(swapChain->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&back)))return false;
+    hr=device->CreateRenderTargetView(back,0,&target);back->Release();
     if(FAILED(hr))return false;
-    hr=device->CreateRenderTargetView(backBuffer,0,&target);backBuffer->Release();
-    if(FAILED(hr))return false;
-    D3D11_TEXTURE2D_DESC depthDesc={};depthDesc.Width=screenWidth;depthDesc.Height=screenHeight;
-    depthDesc.MipLevels=1;depthDesc.ArraySize=1;depthDesc.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthDesc.SampleDesc.Count=1;depthDesc.BindFlags=D3D11_BIND_DEPTH_STENCIL;
-    if(FAILED(device->CreateTexture2D(&depthDesc,0,&depthTexture)))return false;
+    D3D11_TEXTURE2D_DESC td={};td.Width=WIDTH;td.Height=HEIGHT;td.MipLevels=1;td.ArraySize=1;
+    td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+    if(FAILED(device->CreateTexture2D(&td,0,&depthTexture)))return false;
     if(FAILED(device->CreateDepthStencilView(depthTexture,0,&depthView)))return false;
     context->OMSetRenderTargets(1,&target,depthView);
-    D3D11_VIEWPORT vp={};vp.Width=(FLOAT)screenWidth;vp.Height=(FLOAT)screenHeight;vp.MaxDepth=1;
-    context->RSSetViewports(1,&vp);
-    D3D11_RASTERIZER_DESC rs={};rs.FillMode=D3D11_FILL_SOLID;rs.CullMode=D3D11_CULL_NONE;rs.DepthClipEnable=TRUE;
-    ID3D11RasterizerState* raster=0;
-    if(SUCCEEDED(device->CreateRasterizerState(&rs,&raster))) {context->RSSetState(raster);raster->Release();}
+    D3D11_VIEWPORT viewport={};viewport.Width=(float)WIDTH;viewport.Height=(float)HEIGHT;viewport.MaxDepth=1;
+    context->RSSetViewports(1,&viewport);
+    D3D11_RASTERIZER_DESC raster={};raster.FillMode=D3D11_FILL_SOLID;
+    raster.CullMode=D3D11_CULL_NONE;raster.DepthClipEnable=TRUE;
+    ID3D11RasterizerState* rs=0;
+    if(SUCCEEDED(device->CreateRasterizerState(&raster,&rs))){context->RSSetState(rs);rs->Release();}
     std::vector<char> vs,ps;
-    if(!readBinary("bus_vs.cso",vs)||!readBinary("bus_ps.cso",ps)) {MessageBoxA(hwnd,"Shaders .cso nao encontrados ao lado do executavel.","DX11 Bus",MB_ICONERROR);return false;}
+    if(!readBinary("bus_vs.cso",vs)||!readBinary("bus_ps.cso",ps))return false;
     if(FAILED(device->CreateVertexShader(&vs[0],vs.size(),0,&vertexShader)))return false;
     if(FAILED(device->CreatePixelShader(&ps[0],ps.size(),0,&pixelShader)))return false;
-    D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0}};
-    if(FAILED(device->CreateInputLayout(input,1,&vs[0],vs.size(),&vertexLayout)))return false;
-    const Vertex v[]={
-      {-1,-1,-1},{-1,1,-1},{1,1,-1}, {-1,-1,-1},{1,1,-1},{1,-1,-1},
-      {1,-1,1},{1,1,1},{-1,1,1}, {1,-1,1},{-1,1,1},{-1,-1,1},
-      {-1,-1,1},{-1,1,1},{-1,1,-1}, {-1,-1,1},{-1,1,-1},{-1,-1,-1},
-      {1,-1,-1},{1,1,-1},{1,1,1}, {1,-1,-1},{1,1,1},{1,-1,1},
-      {-1,1,-1},{-1,1,1},{1,1,1}, {-1,1,-1},{1,1,1},{1,1,-1},
-      {-1,-1,1},{-1,-1,-1},{1,-1,-1}, {-1,-1,1},{1,-1,-1},{1,-1,1}
+    D3D11_INPUT_ELEMENT_DESC attributes[]={
+        {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0}
     };
-    D3D11_BUFFER_DESC bd={};bd.ByteWidth=sizeof(v);bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA init={};init.pSysMem=v;
-    if(FAILED(device->CreateBuffer(&bd,&init,&cubeVB)))return false;
-    bd=D3D11_BUFFER_DESC();bd.ByteWidth=sizeof(SceneConstants);bd.Usage=D3D11_USAGE_DEFAULT;bd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
-    if(FAILED(device->CreateBuffer(&bd,0,&constantBuffer)))return false;
+    if(FAILED(device->CreateInputLayout(attributes,2,&vs[0],vs.size(),&layout)))return false;
+    const float positions[36][3]={
+        {-1,-1,-1},{-1,1,-1},{1,1,-1}, {-1,-1,-1},{1,1,-1},{1,-1,-1},
+        {1,-1,1},{1,1,1},{-1,1,1}, {1,-1,1},{-1,1,1},{-1,-1,1},
+        {-1,-1,1},{-1,1,1},{-1,1,-1}, {-1,-1,1},{-1,1,-1},{-1,-1,-1},
+        {1,-1,-1},{1,1,-1},{1,1,1}, {1,-1,-1},{1,1,1},{1,-1,1},
+        {-1,1,-1},{-1,1,1},{1,1,1}, {-1,1,-1},{1,1,1},{1,1,-1},
+        {-1,-1,1},{-1,-1,-1},{1,-1,-1}, {-1,-1,1},{1,-1,-1},{1,-1,1}
+    };
+    MeshVertex vertices[36]={};
+    for(int i=0;i<36;i++) {
+        vertices[i].x=positions[i][0];vertices[i].y=positions[i][1];vertices[i].z=positions[i][2];
+        vertices[i].u=(positions[i][0]+1)*0.5f;
+        vertices[i].v=(positions[i][2]+1)*0.5f;
+        if(i<12){vertices[i].u=(positions[i][0]+1)*0.5f;vertices[i].v=(positions[i][1]+1)*0.5f;}
+    }
+    D3D11_BUFFER_DESC desc={};desc.ByteWidth=sizeof(vertices);
+    desc.Usage=D3D11_USAGE_IMMUTABLE;desc.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA init={};init.pSysMem=vertices;
+    if(FAILED(device->CreateBuffer(&desc,&init,&cubeVB)))return false;
+    desc=D3D11_BUFFER_DESC();desc.ByteWidth=sizeof(SceneConstants);
+    desc.Usage=D3D11_USAGE_DEFAULT;desc.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+    if(FAILED(device->CreateBuffer(&desc,0,&constants)))return false;
+    D3D11_SAMPLER_DESC sd={};sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU=D3D11_TEXTURE_ADDRESS_WRAP;sd.AddressV=D3D11_TEXTURE_ADDRESS_WRAP;
+    sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
+    if(FAILED(device->CreateSamplerState(&sd,&sampler)))return false;
+    roadTexture=makeChecker(85,85,85);
+    busTexture=makeChecker(230,232,235);
+    // Arquivos opcionais. Em GLB/FBX, Assimp deve estar habilitado no CMake.
+    std::string base=applicationDirectory();
+    ID3D11ShaderResourceView* custom=loadWIC(device,utf8ToWide(base+"assets/bus.png").c_str());
+    if(custom){releaseObj(busTexture);busTexture=custom;}
+    useModel=loadModelAssimp(device,base+"assets/bus.glb",busModel);
+    if(!useModel)useModel=loadModelAssimp(device,base+"assets/bus.fbx",busModel);
     return true;
 }
-static void shutdownGraphics() {
+static void shutdownGraphics(){
+    motor.stop();
     if(context)context->ClearState();
-    releaseObj(constantBuffer);releaseObj(cubeVB);releaseObj(vertexLayout);
-    releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);releaseObj(depthTexture);
-    releaseObj(target);releaseObj(swapChain);releaseObj(context);releaseObj(device);
+    busModel.clear();
+    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);
+    releaseObj(constants);releaseObj(cubeVB);releaseObj(layout);
+    releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);
+    releaseObj(depthTexture);releaseObj(target);releaseObj(swapChain);
+    releaseObj(context);releaseObj(device);
 }
-static XMMATRIX viewProjection;
-static void drawBox(float x,float y,float z,float sx,float sy,float sz,float heading,const XMFLOAT4& color) {
-    SceneConstants constants;
-    XMMATRIX world=XMMatrixScaling(sx,sy,sz)*XMMatrixRotationY(heading)*XMMatrixTranslation(x,y,z);
-    XMStoreFloat4x4(&constants.worldViewProjection,world*viewProjection);
-    constants.color=color;
-    context->UpdateSubresource(constantBuffer,0,0,&constants,0,0);
+static void setWorld(const XMMATRIX& world,const XMFLOAT4& color,ID3D11ShaderResourceView* texture) {
+    SceneConstants cb;
+    XMStoreFloat4x4(&cb.transform,world*cameraMatrix);
+    cb.color=color;cb.flags=XMFLOAT4(texture?1.0f:0.0f,0,0,0);
+    context->UpdateSubresource(constants,0,0,&cb,0,0);
+    context->PSSetShaderResources(0,1,&texture);
+}
+static void drawBox(float x,float y,float z,float sx,float sy,float sz,float yaw,
+                    const XMFLOAT4& color,ID3D11ShaderResourceView* texture=0) {
+    XMMATRIX world=XMMatrixScaling(sx,sy,sz)*XMMatrixRotationY(yaw)*XMMatrixTranslation(x,y,z);
+    setWorld(world,color,texture);
+    UINT stride=sizeof(MeshVertex),offset=0;
+    context->IASetVertexBuffers(0,1,&cubeVB,&stride,&offset);
     context->Draw(36,0);
 }
-static void drawBus(const BusState& bus,bool ours) {
-    const float x=bus.x,z=bus.z,a=bus.heading;
-    const XMFLOAT4 paint=ours?XMFLOAT4(0.96f,0.65f,0.10f,1):XMFLOAT4(0.15f,0.73f,0.95f,1);
-    const XMFLOAT4 dark(0.09f,0.14f,0.19f,1),wheel(0.04f,0.04f,0.05f,1);
-    drawBox(x,1.65f,z,1.15f,1.5f,3.7f,a,paint);
-    drawBox(x,2.3f,z,1.165f,0.53f,3.37f,a,dark);
-    float frontX=x+sinf(a)*3.69f,frontZ=z+cosf(a)*3.69f;
-    drawBox(frontX,2.05f,frontZ,1.08f,0.84f,0.04f,a,dark);
-    float sideX=cosf(a),sideZ=-sinf(a);
-    for(int side=-1;side<=1;side+=2)for(int axle=-1;axle<=1;axle+=2) {
-        float longitudinal=float(axle)*2.65f;
-        drawBox(x+sideX*side*1.17f+sinf(a)*longitudinal,0.56f,
-                z+sideZ*side*1.17f+cosf(a)*longitudinal,0.2f,0.53f,0.52f,a,wheel);
+static void drawBusPart(const BusState& b,float x,float y,float z,
+                        float sx,float sy,float sz,const XMFLOAT4& color,
+                        ID3D11ShaderResourceView* texture=0,float steer=0,float spin=0) {
+    XMMATRIX world=XMMatrixScaling(sx,sy,sz)*XMMatrixRotationX(spin)*
+        XMMatrixRotationY(steer)*XMMatrixTranslation(x,y,z)*
+        XMMatrixRotationZ(b.roll)*XMMatrixRotationX(b.pitch)*
+        XMMatrixRotationY(b.heading)*XMMatrixTranslation(b.x,b.y,b.z);
+    setWorld(world,color,texture);
+    UINT stride=sizeof(MeshVertex),offset=0;
+    context->IASetVertexBuffers(0,1,&cubeVB,&stride,&offset);
+    context->Draw(36,0);
+}
+static void drawAssimpBus(const BusState& b,const XMFLOAT4& tint) {
+    XMMATRIX world=XMMatrixScaling(1,1,1)*XMMatrixRotationZ(b.roll)*
+        XMMatrixRotationX(b.pitch)*XMMatrixRotationY(b.heading)*
+        XMMatrixTranslation(b.x,b.y,b.z);
+    for(size_t i=0;i<busModel.meshes.size();i++) {
+        const ModelSubmesh& mesh=busModel.meshes[i];
+        setWorld(world,tint,mesh.diffuse);
+        UINT stride=sizeof(MeshVertex),offset=0;
+        context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
+        context->IASetIndexBuffer(mesh.indices,DXGI_FORMAT_R32_UINT,0);
+        context->DrawIndexed(mesh.count,0,0);
+    }
+    context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
+}
+static void drawBus(const BusState& b,bool mine) {
+    XMFLOAT4 paint=mine?XMFLOAT4(1,0.73f,0.23f,1):XMFLOAT4(0.23f,0.78f,0.94f,1);
+    XMFLOAT4 black(0.075f,0.095f,0.14f,1),rubber(0.035f,0.035f,0.04f,1);
+    if(useModel)drawAssimpBus(b,XMFLOAT4(1,1,1,1));
+    else {
+        drawBusPart(b,0,0.50f,0,1.17f,1.27f,3.83f,paint,busTexture);
+        drawBusPart(b,0,1.20f,0,1.18f,0.54f,3.65f,black);
+        drawBusPart(b,0,0.95f,3.79f,1.12f,0.80f,0.055f,black);
+        // Folha de porta abre lateralmente; a posicao vem do servidor.
+        drawBusPart(b,1.19f+b.door*0.58f,0.12f,1.60f,0.06f,1.08f,0.76f,
+                    b.door>0.5f?XMFLOAT4(0.15f,0.21f,0.24f,1):paint);
+        drawBusPart(b,-0.95f,0.75f,3.84f,0.14f,0.13f,0.07f,XMFLOAT4(1,1,0.7f,1));
+        drawBusPart(b,0.95f,0.75f,3.84f,0.14f,0.13f,0.07f,XMFLOAT4(1,1,0.7f,1));
+    }
+    // Mesmo com modelo GLB, as seis rodas fisicas sao renderizadas independentemente.
+    for(int i=0;i<6;i++){
+        float x=sim::wheelOffsetX(i),z=sim::wheelOffsetZ(i);
+        float compression=b.wheelTravel[i];
+        float y=-0.4f-(sim::SPRING_REST-compression);
+        drawBusPart(b,x,y,z,0.20f,0.49f,0.49f,rubber,0,i<2?b.steer*0.47f:0,b.wheelRotation);
+        drawBusPart(b,x*1.17f,y,z,0.07f,0.17f,0.17f,XMFLOAT4(0.58f,0.60f,0.62f,1));
     }
 }
-static void render() {
-    const float clear[]={0.48f,0.69f,0.88f,1};
-    context->ClearRenderTargetView(target,clear);
+static void drawCity() {
+    const XMFLOAT4 grass(0.26f,0.39f,0.20f,1),asphalt(0.55f,0.57f,0.61f,1);
+    drawBox(0,-0.30f,0,240,0.30f,240,0,grass);
+    for(int i=-3;i<=3;i++) {
+        float coordinate=i*60.0f;
+        drawBox(coordinate,0.001f,0,7.0f,0.02f,230,0,asphalt,roadTexture);
+        drawBox(0,0.001f,coordinate,230,0.02f,7.0f,0,asphalt,roadTexture);
+        for(int j=-12;j<=12;j++){
+            drawBox(coordinate,0.03f,j*9.0f,0.085f,0.021f,2.2f,0,XMFLOAT4(1,0.89f,0.44f,1));
+            drawBox(j*9.0f,0.03f,coordinate,2.2f,0.021f,0.085f,0,XMFLOAT4(1,0.89f,0.44f,1));
+        }
+    }
+    for(int i=-3;i<=2;i++)for(int j=-3;j<=2;j++){
+        sim::Box box=sim::building(i,j);
+        float height=5.0f+float((i*i+j*j*3+17)%5)*1.4f;
+        drawBox(box.x,height*0.5f,box.z,box.hx,height*0.5f,box.hz,0,
+                XMFLOAT4(0.58f,0.58f+float((i+3)%3)*0.05f,0.54f,1));
+        drawBox(box.x,height+0.20f,box.z,box.hx+0.3f,0.25f,box.hz+0.3f,0,
+                XMFLOAT4(0.24f,0.26f,0.31f,1));
+    }
+    for(int i=0;i<sim::STOP_COUNT;i++) {
+        sim::Stop s=sim::stop(i);
+        drawBox(s.x+2.4f,1.35f,s.z,0.065f,1.35f,0.065f,0,XMFLOAT4(0.5f,0.5f,0.56f,1));
+        drawBox(s.x+2.4f,2.58f,s.z,0.85f,0.27f,0.09f,0,XMFLOAT4(0.15f,0.38f,0.85f,1));
+        for(int n=0;n<3;n++) {
+            float px=s.x+2.3f+float(n%2)*0.75f,pz=s.z+2.8f+float(n)*1.0f;
+            drawBox(px,0.86f,pz,0.18f,0.58f,0.18f,0,XMFLOAT4(0.25f,0.30f,0.72f,1));
+            drawBox(px,1.60f,pz,0.17f,0.17f,0.17f,0,XMFLOAT4(0.95f,0.69f,0.45f,1));
+        }
+    }
+}
+static const BusState* findBus(const Snapshot& s,uint32_t id){
+    for(uint32_t i=0;i<s.count;i++)if(s.buses[i].id==id)return &s.buses[i];
+    return 0;
+}
+static BusState interpolated(const BusState& a,const BusState& b,float t) {
+    BusState r=b;
+    r.x=a.x+(b.x-a.x)*t;r.y=a.y+(b.y-a.y)*t;r.z=a.z+(b.z-a.z)*t;
+    float difference=atan2f(sinf(b.heading-a.heading),cosf(b.heading-a.heading));
+    r.heading=a.heading+difference*t;
+    r.speed=a.speed+(b.speed-a.speed)*t;
+    r.steer=a.steer+(b.steer-a.steer)*t;
+    r.roll=a.roll+(b.roll-a.roll)*t;
+    r.pitch=a.pitch+(b.pitch-a.pitch)*t;
+    r.door=a.door+(b.door-a.door)*t;
+    r.wheelRotation=a.wheelRotation+(b.wheelRotation-a.wheelRotation)*t;
+    for(int i=0;i<6;i++)r.wheelTravel[i]=a.wheelTravel[i]+(b.wheelTravel[i]-a.wheelTravel[i])*t;
+    return r;
+}
+static BusState currentBus(uint32_t id,float alpha) {
+    const BusState* newer=findBus(latest,id);
+    if(!newer){BusState empty={};return empty;}
+    const BusState* older=findBus(earlier,id);
+    if(!older)return *newer;
+    return interpolated(*older,*newer,alpha);
+}
+static void drawFrame(){
+    if(!device)return;
+    float color[]={0.48f,0.69f,0.89f,1.0f};
+    context->ClearRenderTargetView(target,color);
     context->ClearDepthStencilView(depthView,D3D11_CLEAR_DEPTH,1,0);
-    UINT stride=sizeof(Vertex),offset=0;
-    context->IASetInputLayout(vertexLayout);
-    context->IASetVertexBuffers(0,1,&cubeVB,&stride,&offset);
+    context->IASetInputLayout(layout);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(vertexShader,0,0);context->PSSetShader(pixelShader,0,0);
-    context->VSSetConstantBuffers(0,1,&constantBuffer);context->PSSetConstantBuffers(0,1,&constantBuffer);
-    BusState focus={};bool found=false;
-    for(uint32_t i=0;i<busCount;i++)if(allBuses[i].id==myId) {focus=allBuses[i];found=true;break;}
-    float a=found?focus.heading:0;
-    XMVECTOR eye=XMVectorSet(focus.x-sinf(a)*15.0f,9.0f,focus.z-cosf(a)*15.0f,1);
-    XMVECTOR at=XMVectorSet(focus.x,1.7f,focus.z,1);
-    viewProjection=XMMatrixLookAtLH(eye,at,XMVectorSet(0,1,0,0)) * XMMatrixPerspectiveFovLH(XM_PIDIV4,float(screenWidth)/screenHeight,0.1f,700.0f);
-    drawBox(0,-0.21f,0,150,0.20f,150,0,XMFLOAT4(0.22f,0.39f,0.20f,1));
-    drawBox(0,-0.005f,0,8,0.015f,145,0,XMFLOAT4(0.21f,0.23f,0.25f,1));
-    drawBox(0,-0.003f,0,145,0.015f,7,0,XMFLOAT4(0.21f,0.23f,0.25f,1));
-    for(int i=-14;i<=14;i++) {
-        drawBox(0,0.02f,i*5.0f,0.08f,0.015f,1.55f,0,XMFLOAT4(1,0.9f,0.3f,1));
-        drawBox(i*5.0f,0.023f,0,1.55f,0.015f,0.08f,0,XMFLOAT4(1,0.9f,0.3f,1));
+    context->VSSetShader(vertexShader,0,0);
+    context->PSSetShader(pixelShader,0,0);
+    context->VSSetConstantBuffers(0,1,&constants);
+    context->PSSetConstantBuffers(0,1,&constants);
+    context->PSSetSamplers(0,1,&sampler);
+    float alpha=1.0f;
+    if(gotSnapshot && earlier.count>0)alpha=sim::clamp((GetTickCount()-latest.received)/50.0f,0,1);
+    BusState focus=currentBus(myId,alpha);
+    float sine=sinf(focus.heading),cosine=cosf(focus.heading);
+    XMVECTOR eye,at;
+    if(cockpit) {
+        eye=XMVectorSet(focus.x+sine*2.90f,focus.y+1.38f,focus.z+cosine*2.90f,1);
+        at=XMVectorSet(focus.x+sine*35.0f,focus.y+1.20f,focus.z+cosine*35.0f,1);
+    } else {
+        eye=XMVectorSet(focus.x-sine*15.0f,focus.y+8.5f,focus.z-cosine*15.0f,1);
+        at=XMVectorSet(focus.x,focus.y+0.45f,focus.z,1);
     }
-    for(int i=-6;i<=6;i++)for(int s=-1;s<=1;s+=2) {
-        if(i==0)continue;
-        float px=float(s)*19.0f;
-        drawBox(px,3.0f,i*18.0f,4,3,4,0,XMFLOAT4(0.68f,0.66f,0.59f,1));
-        drawBox(px,6.25f,i*18.0f,4.2f,0.25f,4.2f,0,XMFLOAT4(0.34f,0.20f,0.18f,1));
+    cameraMatrix=XMMatrixLookAtLH(eye,at,XMVectorSet(0,1,0,0))*
+        XMMatrixPerspectiveFovLH(XM_PIDIV4,float(WIDTH)/HEIGHT,0.1f,800.0f);
+    drawCity();
+    for(uint32_t i=0;i<latest.count;i++) {
+        if(cockpit && latest.buses[i].id==myId)continue;
+        drawBus(currentBus(latest.buses[i].id,alpha),latest.buses[i].id==myId);
     }
-    for(uint32_t i=0;i<busCount;i++)drawBus(allBuses[i],allBuses[i].id==myId);
+    motor.update(focus.rpm);
+    if(connected && GetTickCount()-lastHud>250) {
+        char title[512];
+        if(latest.count>0)
+            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Jogadores %u | F1 camera E porta Q/Z marcha",
+               myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
+               (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count);
+        else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
+        SetWindowTextA(windowHandle,title);lastHud=GetTickCount();
+    }
     swapChain->Present(1,0);
 }
-static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT message,WPARAM wParam,LPARAM lParam) {
-    if(message==WM_DESTROY) {running=false;PostQuitMessage(0);return 0;}
-    if(message==WM_KEYDOWN && wParam==VK_ESCAPE) {DestroyWindow(hwnd);return 0;}
-    return DefWindowProcA(hwnd,message,wParam,lParam);
-}
-static bool startNetwork(const char* ip) {
-    if(!initializeSockets())return false;
-    udp=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
-    if(udp==INVALID_SOCKET)return false;
-    u_long nonBlocking=1;ioctlsocket(udp,FIONBIO,&nonBlocking);
-    serverAddress.sin_family=AF_INET;serverAddress.sin_port=htons(BUS_PORT);
-    serverAddress.sin_addr.s_addr=inet_addr(ip);
-    return serverAddress.sin_addr.s_addr!=INADDR_NONE;
-}
-int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show) {
-    const char* ip="127.0.0.1";
-    std::string address=commandLine;
-    if(!address.empty()) {
-        size_t b=address.find_first_not_of(" \t\"");
-        size_t e=address.find_first_of(" \t\"",b==std::string::npos?0:b);
-        if(b!=std::string::npos)address=address.substr(b,e==std::string::npos?e:e-b);
-        if(!address.empty())ip=address.c_str();
+static void sendControls() {
+    if(!connected)return;
+    NetPacket packet;initPacket(packet,PACKET_INPUT);
+    packet.clientId=myId;
+    bool foreground=GetForegroundWindow()==windowHandle;
+    if(foreground){
+        packet.throttle=float((GetAsyncKeyState('W')&0x8000)?1:0)-float((GetAsyncKeyState('S')&0x8000)?1:0);
+        packet.steering=float((GetAsyncKeyState('D')&0x8000)?1:0)-float((GetAsyncKeyState('A')&0x8000)?1:0);
+        packet.brake=(GetAsyncKeyState(VK_SPACE)&0x8000)?1.0f:0;
+        if(GetAsyncKeyState('E')&0x8000)packet.flags|=INPUT_TOGGLE_DOOR;
+        if(GetAsyncKeyState('Q')&0x8000)packet.flags|=INPUT_GEAR_UP;
+        if(GetAsyncKeyState('Z')&0x8000)packet.flags|=INPUT_GEAR_DOWN;
     }
+    sendto(socketUdp,(char*)&packet,sizeof(packet),0,(sockaddr*)&serverAddress,sizeof(serverAddress));
+}
+static void receiveUpdates() {
+    if(!connected)return;
+    NetPacket packet; sockaddr_in sender={};int senderSize=sizeof(sender);int n;
+    while((n=recvfrom(socketUdp,(char*)&packet,sizeof(packet),0,(sockaddr*)&sender,&senderSize))>0) {
+        if(sender.sin_addr.s_addr==serverAddress.sin_addr.s_addr &&
+           sender.sin_port==serverAddress.sin_port && n==(int)sizeof(packet) &&
+           packet.magic==BUS_MAGIC && packet.type==PACKET_WORLD &&
+           packet.count<=MAX_BUSES && (!gotSnapshot || (int32_t)(packet.tick-lastTick)>0)) {
+            earlier=latest;
+            latest.count=packet.count;
+            memcpy(latest.buses,packet.buses,sizeof(BusState)*latest.count);
+            latest.received=GetTickCount();
+            myId=packet.clientId;lastTick=packet.tick;gotSnapshot=true;
+        }
+        senderSize=sizeof(sender);
+    }
+}
+static bool connectTo(const char* ipv4) {
+    if(connected)return true;
+    if(!initializeSockets())return false;
+    socketUdp=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+    if(socketUdp==INVALID_SOCKET){closeSockets();return false;}
+    serverAddress.sin_family=AF_INET;serverAddress.sin_port=htons(BUS_PORT);
+    serverAddress.sin_addr.s_addr=inet_addr(ipv4);
+    if(serverAddress.sin_addr.s_addr==INADDR_NONE) {
+        closesocket(socketUdp);socketUdp=INVALID_SOCKET;closeSockets();return false;
+    }
+    u_long nonBlocking=1;ioctlsocket(socketUdp,FIONBIO,&nonBlocking);
+    connected=true;myId=0;gotSnapshot=false;lastTick=0;earlier=Snapshot();latest=Snapshot();
+    ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
+    motor.start();
+    return true;
+}
+static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
+    if(msg==WM_DESTROY){running=false;PostQuitMessage(0);return 0;}
+    if(msg==WM_KEYDOWN){
+        if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}
+        if(w==VK_F1 && !((l>>30)&1)){cockpit=!cockpit;return 0;}
+    }
+    if(msg==WM_COMMAND && LOWORD(w)==102){
+        char ipv4[80]={};GetWindowTextA(ipInput,ipv4,80);
+        if(!connectTo(ipv4))
+            MessageBoxA(hwnd,"Informe um endereco IPv4 valido, ex.: 127.0.0.1","Conexao",MB_OK|MB_ICONWARNING);
+        return 0;
+    }
+    return DefWindowProcA(hwnd,msg,w,l);
+}
+int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
+    CoInitializeEx(0,COINIT_MULTITHREADED);
     WNDCLASSA wc={};wc.lpfnWndProc=windowProcedure;wc.hInstance=instance;
-    wc.lpszClassName="DX11BusMultiplayerWindow";wc.hCursor=LoadCursor(0,IDC_ARROW);
+    wc.hCursor=LoadCursor(0,IDC_ARROW);wc.lpszClassName="DX11BusNetworkGame";
     if(!RegisterClassA(&wc))return 1;
-    RECT rect={0,0,screenWidth,screenHeight};AdjustWindowRect(&rect,WS_OVERLAPPEDWINDOW,FALSE);
-    windowHandle=CreateWindowA(wc.lpszClassName,"DX11 Bus Multiplayer - W/S acelerar | A/D virar | Espaco freio",WS_OVERLAPPEDWINDOW,
+    const DWORD style=WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX;
+    RECT rect={0,0,WIDTH,HEIGHT};AdjustWindowRect(&rect,style,FALSE);
+    windowHandle=CreateWindowA(wc.lpszClassName,"DX11 Bus Multiplayer | Digite o IP para conectar",style,
         CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,0,0,instance,0);
     if(!windowHandle)return 1;
+    CreateWindowA("STATIC","IP do servidor:",WS_CHILD|WS_VISIBLE,22,18,120,25,windowHandle,0,instance,0);
+    ipInput=CreateWindowExA(WS_EX_CLIENTEDGE,"EDIT","127.0.0.1",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,
+         140,14,180,27,windowHandle,(HMENU)101,instance,0);
+    connectButton=CreateWindowA("BUTTON","Conectar",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+         335,14,110,27,windowHandle,(HMENU)102,instance,0);
     ShowWindow(windowHandle,show);
-    if(!initializeGraphics(windowHandle)) {MessageBoxA(windowHandle,"Erro ao inicializar Direct3D 11. Confira shaders e driver.","DX11 Bus",MB_ICONERROR);shutdownGraphics();return 1;}
-    if(!startNetwork(ip)) {MessageBoxA(windowHandle,"Endereco IPv4 ou Winsock invalido.","Rede",MB_ICONERROR);shutdownGraphics();return 1;}
-    LARGE_INTEGER freq,last,now;QueryPerformanceFrequency(&freq);QueryPerformanceCounter(&last);
-    double sendTimer=0;
-    while(running) {
+    if(!initializeGraphics(windowHandle)){
+        MessageBoxA(windowHandle,"Nao foi possivel inicializar DX11 ou carregar os shaders .cso.","DX11 Bus",MB_ICONERROR);
+        shutdownGraphics();return 1;
+    }
+    std::string cmd=commandLine;
+    if(!cmd.empty()){
+        size_t start=cmd.find_first_not_of(" \t\"");
+        if(start!=std::string::npos){
+            size_t end=cmd.find_first_of(" \t\"",start);
+            cmd=cmd.substr(start,end==std::string::npos?std::string::npos:end-start);
+            if(!cmd.empty()){SetWindowTextA(ipInput,cmd.c_str());connectTo(cmd.c_str());}
+        }
+    }
+    LARGE_INTEGER frequency,last,now;QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&last);
+    double accumulator=0;
+    while(running){
         MSG msg;
-        while(PeekMessageA(&msg,0,0,0,PM_REMOVE)) {if(msg.message==WM_QUIT)running=false;TranslateMessage(&msg);DispatchMessageA(&msg);}
+        while(PeekMessageA(&msg,0,0,0,PM_REMOVE)) {
+            if(msg.message==WM_QUIT){running=false;break;}
+            TranslateMessage(&msg);DispatchMessageA(&msg);
+        }
+        if(!running)break;
         QueryPerformanceCounter(&now);
-        double dt=double(now.QuadPart-last.QuadPart)/double(freq.QuadPart);last=now;
-        if(dt>0.1)dt=0.1;
-        sendTimer+=dt;
-        if(sendTimer>=1.0/30.0) {
-            sendTimer=0;
-            NetPacket input;initPacket(input,1);
-            input.clientId=myId;
-            input.throttle=((GetAsyncKeyState('W')&0x8000)?1.0f:0.0f)-((GetAsyncKeyState('S')&0x8000)?1.0f:0.0f);
-            input.steering=((GetAsyncKeyState('D')&0x8000)?1.0f:0.0f)-((GetAsyncKeyState('A')&0x8000)?1.0f:0.0f);
-            input.brake=(GetAsyncKeyState(VK_SPACE)&0x8000)?1.0f:0.0f;
-            sendto(udp,(char*)&input,sizeof(input),0,(sockaddr*)&serverAddress,sizeof(serverAddress));
-        }
-        NetPacket packet; sockaddr_in from={};int fromLen=sizeof(from);int size;
-        while((size=recvfrom(udp,(char*)&packet,sizeof(packet),0,(sockaddr*)&from,&fromLen))>0) {
-            if(from.sin_addr.s_addr==serverAddress.sin_addr.s_addr && from.sin_port==serverAddress.sin_port &&
-               size==sizeof(NetPacket) && packet.magic==BUS_MAGIC && packet.type==2 && packet.count<=MAX_BUSES) {
-                myId=packet.clientId;busCount=packet.count;
-                memcpy(allBuses,packet.buses,sizeof(BusState)*busCount);
-            }
-            fromLen=sizeof(from);
-        }
-        render();
+        double delta=double(now.QuadPart-last.QuadPart)/double(frequency.QuadPart);last=now;
+        accumulator+=std::min(0.20,delta);
+        while(accumulator>=1.0/30.0){sendControls();accumulator-=1.0/30.0;}
+        receiveUpdates();
+        if(!IsIconic(windowHandle))drawFrame();
         Sleep(1);
     }
-    if(udp!=INVALID_SOCKET)closesocket(udp);closeSockets();shutdownGraphics();return 0;
+    if(socketUdp!=INVALID_SOCKET)closesocket(socketUdp);
+    if(connected)closeSockets();
+    shutdownGraphics();CoUninitialize();
+    return 0;
 }
