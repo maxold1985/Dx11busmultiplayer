@@ -1,4 +1,10 @@
 #define _WIN32_WINNT 0x0601
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include "simulation.hpp"
 #include <windows.h>
 #include <stdio.h>
