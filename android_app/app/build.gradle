@@ -6,7 +6,7 @@ def androidAssimp = (findProperty('busAndroidAssimp') ?: 'false').toString().toB
 android {
     namespace 'com.dx11bus.android'
     compileSdk 35
-    ndkVersion '27.2.12479018'
+    ndkVersion '27.0.12077973'
 
     defaultConfig {
         applicationId 'com.dx11bus.android'
