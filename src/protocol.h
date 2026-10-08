@@ -7,7 +7,9 @@
 #include <string.h>
 
 static const unsigned short BUS_PORT = 27015;
-static const int MAX_BUSES = 16;
+static const int MAX_PLAYERS = 16;
+static const int AI_BUSES = 4;
+static const int MAX_BUSES = MAX_PLAYERS + AI_BUSES;
 static const uint32_t BUS_MAGIC = 0x42555332; // BUS2: protocolo alterado, ambos precisam desta versao
 
 enum { PACKET_INPUT=1, PACKET_WORLD=2 };
