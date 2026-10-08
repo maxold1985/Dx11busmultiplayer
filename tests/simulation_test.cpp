@@ -16,7 +16,7 @@ int main() {
     sim::input(d,1,0,0,0);
     for(int i=0;i<120;i++)sim::step(d,1.0f/60);
     assert(d.b.z>startZ);assert(d.b.y>0.85f);
-    for(int i=0;i<6;i++)assert(d.wheelTravel[i]>=0 && d.b.wheelTravel[i]<=sim::SPRING_REST);
+    for(int i=0;i<6;i++)assert(d.wheelTravel[i]>=0 && d.wheelTravel[i]<=sim::SPRING_REST);
     d.b.speed=0;d.b.z=18;d.b.door=0;
     sim::input(d,0,0,1,INPUT_TOGGLE_DOOR);
     assert(d.b.door>0.5f);
