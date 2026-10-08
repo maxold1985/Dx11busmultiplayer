@@ -115,6 +115,9 @@ int socketFd=-1;
 sockaddr_in serverAddr={};
 bool connected=false,gotSnapshot=false,cockpit=false;
 NetPacket latest={};
+NetPacket earlier={};
+bool hasPreviousSnapshot=false;
+uint64_t snapshotAt=0;
 uint32_t playerId=0,lastTick=0,pendingFlags=0;
 uint64_t lastSend=0,lastReceived=0,flagUntil=0;
 float throttle=0,steering=0,brake=0,clutch=0;
@@ -788,7 +791,12 @@ void updateNetwork() {
             (gotSnapshot && (int32_t)(packet.tick-lastTick)<=0)) {
             fromSize=sizeof(from);continue;
         }
+        if(gotSnapshot) {
+            earlier=latest;
+            hasPreviousSnapshot=true;
+        }
         latest=packet;
+        snapshotAt=now;
         playerId=packet.clientId;
         gotSnapshot=true;
         lastTick=packet.tick;
@@ -800,7 +808,10 @@ void updateNetwork() {
 }
 bool connectTo(const std::string& ipv4) {
     if(socketFd>=0)close(socketFd);
-    socketFd=-1;connected=false;gotSnapshot=false;playerId=0;lastTick=0;
+    socketFd=-1;connected=false;gotSnapshot=false;hasPreviousSnapshot=false;
+    memset(&latest,0,sizeof(latest));
+    memset(&earlier,0,sizeof(earlier));
+    playerId=0;lastTick=0;
     sockaddr_in address={};
     address.sin_family=AF_INET;address.sin_port=htons(BUS_PORT);
     if(inet_pton(AF_INET,ipv4.c_str(),&address.sin_addr)!=1) {
@@ -826,13 +837,53 @@ std::string fromJava(JNIEnv* env,jstring value) {
     env->ReleaseStringUTFChars(value,c);
     return result;
 }
+const BusState* findState(const NetPacket& packet,uint32_t id) {
+    for(uint32_t i=0;i<packet.count && i<MAX_BUSES;++i)
+        if(packet.buses[i].id==id)return &packet.buses[i];
+    return 0;
+}
+float blendFraction() {
+    const float elapsed=(float)(androidnet::millis()-snapshotAt)*0.02f;
+    return std::max(0.0f,std::min(1.0f,elapsed));
+}
+BusState smoothBus(uint32_t id) {
+    const BusState* newer=findState(latest,id);
+    if(!newer) {
+        BusState empty={};
+        empty.y=1.6f;
+        return empty;
+    }
+    if(!hasPreviousSnapshot)return *newer;
+    const BusState* older=findState(earlier,id);
+    if(!older)return *newer;
+    const float dx=newer->x-older->x,dz=newer->z-older->z;
+    if(dx*dx+dz*dz>2500.0f)return *newer; // teleport / reset
+    const float t=blendFraction();
+    BusState state=*newer;
+    state.x=older->x+(newer->x-older->x)*t;
+    state.y=older->y+(newer->y-older->y)*t;
+    state.z=older->z+(newer->z-older->z)*t;
+    const float angle=atan2f(sinf(newer->heading-older->heading),
+                             cosf(newer->heading-older->heading));
+    state.heading=older->heading+angle*t;
+    state.speed=older->speed+(newer->speed-older->speed)*t;
+    state.steer=older->steer+(newer->steer-older->steer)*t;
+    state.pitch=older->pitch+(newer->pitch-older->pitch)*t;
+    state.roll=older->roll+(newer->roll-older->roll)*t;
+    state.door=older->door+(newer->door-older->door)*t;
+    state.wheelRotation=older->wheelRotation+
+        (newer->wheelRotation-older->wheelRotation)*t;
+    state.rpm=older->rpm+(newer->rpm-older->rpm)*t;
+    return state;
+}
 BusState focusBus() {
+    if(gotSnapshot)return smoothBus(playerId);
     BusState bus={};
     bus.y=1.6f;
-    if(gotSnapshot)for(uint32_t i=0;i<latest.count;++i)
-        if(latest.buses[i].id==playerId)return latest.buses[i];
+    bus.rpm=700.0f;
     return bus;
 }
+
 } // namespace
 
 extern "C" JNIEXPORT void JNICALL
@@ -898,7 +949,7 @@ Java_com_dx11bus_android_BusActivity_nativeDraw(JNIEnv* env,jclass) {
     } else {
         for(uint32_t i=0;i<latest.count;++i) {
             if(cockpit && latest.buses[i].id==playerId)continue;
-            drawBus(pv,latest.buses[i],eye);
+            drawBus(pv,smoothBus(latest.buses[i].id),eye);
         }
     }
     glBindVertexArray(0);
