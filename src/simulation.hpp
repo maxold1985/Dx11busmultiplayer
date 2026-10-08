@@ -65,8 +65,9 @@ static const int STOP_COUNT=6;
 struct Dynamics {
     BusState b;
     float verticalSpeed,pitchSpeed,rollSpeed,throttle,steering,brake,boardingSeconds;
+    int boardedAtStop;
     uint32_t lastFlags;
-    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),lastFlags(0) {
+    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),lastFlags(0) {
         memset(&b,0,sizeof(b));b.y=1.6f;b.gear=1;b.rpm=700;
     }
 };
@@ -135,13 +136,20 @@ inline void step(Dynamics& d,float dt) {
     suspension(d,dt);
     Stop s=stop((int)b.nextStop);
     const float dx=b.x-s.x,dz=b.z-s.z;
-    if(dx*dx+dz*dz<64.0f && std::fabs(b.speed)<0.3f && b.door>0.5f) {
+    const float distance2=dx*dx+dz*dz;
+    if(distance2<64.0f && std::fabs(b.speed)<0.3f && b.door>0.5f) {
         d.boardingSeconds+=dt;
-        if(d.boardingSeconds>1.0f && b.passengers<40) {++b.passengers;d.boardingSeconds=0;}
-        if(b.passengers>=40) b.nextStop=(b.nextStop+1)%STOP_COUNT;
-    } else {
-        d.boardingSeconds=0;
-        if(dx*dx+dz*dz>400.0f && b.passengers>=40) b.passengers=20;
+        if(d.boardingSeconds>=1.0f && d.boardedAtStop<6) {
+            d.boardingSeconds=0;
+            if(b.passengers<40)++b.passengers;
+            ++d.boardedAtStop;
+        }
+    } else d.boardingSeconds=0;
+    // Apos pelo menos um embarque, sair do ponto avanca a rota.
+    if(distance2>196.0f && d.boardedAtStop>0) {
+        d.boardedAtStop=0;
+        b.nextStop=(b.nextStop+1)%STOP_COUNT;
+        if(b.passengers>8)b.passengers-=4; // desembarque simplificado
     }
 }
 inline void separate(Dynamics& a,Dynamics& b) {
