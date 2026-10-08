@@ -557,11 +557,15 @@ static void drawFrame(){
 			const char* steeringLabel = focus.steeringMode == STEERING_OMSI_APPROX ?
 				"OMSI aprox." : "Classica";
 
+			const char* gearboxLabel =
+				focus.transmissionMode == TRANSMISSION_MANUAL ?
+				"Manual" : "Automatica";
+
 			sprintf(
 				title,
 				"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | "
 				"%u passageiros | Parada %u | %s | Veiculos %u | "
-				"Direcao: %s (C cedilha) | R origem | X %.0f Z %.0f",
+				"Cambio: %s (Q/Z/G) | Direcao: %s | R origem | X %.0f Z %.0f",
 				myId,
 				fabsf(focus.speed) * 3.6f,
 				(int)focus.gear,
@@ -570,6 +574,7 @@ static void drawFrame(){
 				(unsigned)focus.nextStop + 1,
 				cockpit ? "Cabine" : "Externa",
 				(unsigned)latest.count,
+				gearboxLabel,
 				steeringLabel,
 				focus.x,
 				focus.z
