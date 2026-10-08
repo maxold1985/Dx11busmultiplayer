@@ -13,6 +13,7 @@
 #include <vector>
 #include <string>
 #include <stdio.h>
+#include <cctype>
 
 namespace omsi {
 inline uint32_t ddsU32(const std::vector<uint8_t>& d,size_t at){
