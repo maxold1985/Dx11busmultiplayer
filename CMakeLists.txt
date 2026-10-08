@@ -14,14 +14,45 @@ if(NOT WIN32)
 endif()
 add_executable(bus_server src/server.cpp)
 target_link_libraries(bus_server ws2_32)
-option(BUS_WITH_ASSIMP "Enable GLB/FBX import via compatible i686 Assimp" OFF)
+option(BUS_WITH_ASSIMP "Enable GLB/FBX/3DS via compatible i686 Assimp" OFF)
+set(BUS_ASSIMP_INCLUDE_DIR "" CACHE PATH "Directory containing assimp/Importer.hpp")
+set(BUS_ASSIMP_LIBRARY "" CACHE FILEPATH "Full path to i686 Assimp .a or .dll.a")
 if(BUS_WITH_ASSIMP)
-    find_package(assimp CONFIG QUIET)
-    if(NOT assimp_FOUND)
-        find_package(assimp QUIET)
-    endif()
-    if(NOT assimp_FOUND)
-        message(FATAL_ERROR "Assimp not found: set assimp_DIR or disable BUS_WITH_ASSIMP")
+    # Prefer explicit paths. Broken build-tree assimpConfig.cmake files must not
+    # be loaded: they often refer to a missing generated assimpTargets.cmake.
+    if(BUS_ASSIMP_INCLUDE_DIR AND BUS_ASSIMP_LIBRARY)
+        if(NOT EXISTS "${BUS_ASSIMP_INCLUDE_DIR}/assimp/Importer.hpp")
+            message(FATAL_ERROR "Invalid BUS_ASSIMP_INCLUDE_DIR: expected assimp/Importer.hpp")
+        endif()
+        if(NOT EXISTS "${BUS_ASSIMP_LIBRARY}")
+            message(FATAL_ERROR "BUS_ASSIMP_LIBRARY does not exist")
+        endif()
+        add_library(bus_assimp_imported UNKNOWN IMPORTED)
+        set_target_properties(bus_assimp_imported PROPERTIES
+            IMPORTED_LOCATION "${BUS_ASSIMP_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${BUS_ASSIMP_INCLUDE_DIR}")
+        set(BUS_ASSIMP_TARGET bus_assimp_imported)
+    else()
+        # Search actual headers and libraries, never a potentially stale
+        # assimpConfig.cmake. ASSIMP_ROOT is an optional installation prefix.
+        find_path(BUS_ASSIMP_HEADER_DIR assimp/Importer.hpp
+            HINTS "${ASSIMP_ROOT}" "$ENV{assimp_ROOT}"
+            PATH_SUFFIXES include)
+        find_library(BUS_ASSIMP_FOUND_LIBRARY NAMES assimp libassimp
+            HINTS "${ASSIMP_ROOT}" "$ENV{assimp_ROOT}"
+            PATH_SUFFIXES lib lib32 build-i686/lib build-i686/bin)
+        if(NOT BUS_ASSIMP_HEADER_DIR OR NOT BUS_ASSIMP_FOUND_LIBRARY)
+            message(FATAL_ERROR
+                "Assimp i686 headers/library not found. Set "
+                "-DBUS_ASSIMP_INCLUDE_DIR=.../include and "
+                "-DBUS_ASSIMP_LIBRARY=.../libassimp.dll.a (or libassimp.a). "
+                "Do not set assimp_DIR to an incomplete build directory.")
+        endif()
+        add_library(bus_assimp_imported UNKNOWN IMPORTED)
+        set_target_properties(bus_assimp_imported PROPERTIES
+            IMPORTED_LOCATION "${BUS_ASSIMP_FOUND_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${BUS_ASSIMP_HEADER_DIR}")
+        set(BUS_ASSIMP_TARGET bus_assimp_imported)
     endif()
 endif()
 find_program(FXC_EXECUTABLE NAMES fxc fxc.exe)
@@ -42,14 +73,7 @@ add_dependencies(bus_client bus_shaders)
 target_link_libraries(bus_client d3d11 dxgi ws2_32 user32 gdi32 winmm ole32 uuid windowscodecs comdlg32)
 if(BUS_WITH_ASSIMP)
     target_compile_definitions(bus_client PRIVATE BUS_HAS_ASSIMP=1)
-    if(TARGET assimp::assimp)
-        target_link_libraries(bus_client assimp::assimp)
-    elseif(TARGET assimp)
-        target_link_libraries(bus_client assimp)
-    else()
-        target_include_directories(bus_client PRIVATE ${ASSIMP_INCLUDE_DIRS})
-        target_link_libraries(bus_client ${ASSIMP_LIBRARIES})
-    endif()
+    target_link_libraries(bus_client ${BUS_ASSIMP_TARGET})
 endif()
 add_custom_command(TARGET bus_client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${VS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_vs.cso"
