@@ -93,3 +93,16 @@ Em Linux ou ambiente C++11: cmake -S . -B build_native && cmake --build build_na
 ## Limites conhecidos
 
 Este e um prototipo: colisao 2D simplificada, suspensao em terreno por altura, IA de trafego por pontos fixos, contador de passageiros sem pedestres animados, e nenhuma predicao de cliente, NAT traversal, autenticacao, criptografia ou anti-cheat. Nao afirmar compatibilidade WinLibs antes da compilacao real.
+
+## Android (OpenGL ES 3.0)
+
+O cliente Android grafico e um projeto Android Studio adicional em [android_app](android_app/).
+Mantenha o cliente/servidor DirectX 11 Windows sem alteracoes: Android usa
+GLSurfaceView, JNI, o mesmo protocolo UDP BUS4 e leitores OMSI (.o3d/.3ds).
+
+Abra android_app no Android Studio (JDK 17, SDK 35, NDK 27.2.12479018,
+CMake 3.22.1), compile o APK debug e use os botoes Modelo, Script,
+Pasta OMSI e Conectar. Guia: [android_app/README.md](android_app/README.md).
+
+O servidor Android de terminal tambem continua disponivel em
+src/android_server.cpp pelo build_ndk.bat. O APK grafico e **cliente**.
