@@ -110,7 +110,8 @@ struct DrawPart {
     UINT count;
     float rgba[4];
     bool transparent;
-    DrawPart():indices(0),texture(0),count(0),transparent(false){for(int i=0;i<4;i++)rgba[i]=1;}
+    float center[3];
+    DrawPart():indices(0),texture(0),count(0),transparent(false){for(int i=0;i<4;i++)rgba[i]=1;for(int i=0;i<3;i++)center[i]=0;}
 };
 struct GpuMesh {
     ID3D11Buffer* vertices;
@@ -211,6 +212,18 @@ inline bool upload(ID3D11Device* device,Bus& bus,const Mesh& mesh,
         init.pSysMem=&indices[0];
         if(FAILED(device->CreateBuffer(&bd,&init,&part.indices)))continue;
         part.count=(UINT)indices.size();
+        // Geometry centroid in mesh-local space for camera-distance sorting.
+        // Compute from indexed triangles rather than mesh origin/pivot.
+        for(size_t k=0;k<indices.size();++k) {
+            const MeshVertex& v=vertices[indices[k]];
+            part.center[0]+=v.x;
+            part.center[1]+=v.y;
+            part.center[2]+=v.z;
+        }
+        const float invCount=1.0f/(float)indices.size();
+        for(int axis=0;axis<3;++axis) {
+            part.center[axis]*=invCount;
+        }
         memcpy(part.rgba,mesh.materials[material].rgba,sizeof(part.rgba));
         // Glass in many OMSI/3DS mods has opaque diffuse alpha despite
         // being a window. Identify it from material texture names.
