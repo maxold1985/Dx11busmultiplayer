@@ -15,6 +15,18 @@ inline XMMATRIX XMMatrixRotationX(float a){XMMATRIX r=identity();float c=cosf(a)
 inline XMMATRIX XMMatrixRotationZ(float a){XMMATRIX r=identity();float c=cosf(a),s=sinf(a);r.m[0][0]=c;r.m[0][1]=s;r.m[1][0]=-s;r.m[1][1]=c;return r;}
 inline XMMATRIX XMMatrixRotationY(float a){XMMATRIX r=identity();float c=cosf(a),s=sinf(a);r.m[0][0]=c;r.m[0][2]=-s;r.m[2][0]=s;r.m[2][2]=c;return r;}
 inline XMMATRIX XMMatrixTranslation(float x,float y,float z){XMMATRIX r=identity();r.m[3][0]=x;r.m[3][1]=y;r.m[3][2]=z;return r;}
+inline XMVECTOR XMVectorZero(){return XMVectorSet(0,0,0,0);}
+inline XMVECTOR XMVectorSubtract(XMVECTOR a,XMVECTOR b){return XMVectorSet(a.x-b.x,a.y-b.y,a.z-b.z,a.w-b.w);}
+inline float XMVectorGetX(XMVECTOR v){return v.x;}
+inline XMVECTOR XMVector3LengthSq(XMVECTOR v){float length=v.x*v.x+v.y*v.y+v.z*v.z;return XMVectorSet(length,length,length,length);}
+inline XMVECTOR XMVector3TransformCoord(XMVECTOR v,const XMMATRIX& m){
+    const float x=v.x*m.m[0][0]+v.y*m.m[1][0]+v.z*m.m[2][0]+m.m[3][0];
+    const float y=v.x*m.m[0][1]+v.y*m.m[1][1]+v.z*m.m[2][1]+m.m[3][1];
+    const float z=v.x*m.m[0][2]+v.y*m.m[1][2]+v.z*m.m[2][2]+m.m[3][2];
+    const float w=v.x*m.m[0][3]+v.y*m.m[1][3]+v.z*m.m[2][3]+m.m[3][3];
+    if(fabsf(w)>1.0e-8f){return XMVectorSet(x/w,y/w,z/w,1.0f);}
+    return XMVectorSet(x,y,z,1.0f);
+}
 inline XMVECTOR sub(XMVECTOR a,XMVECTOR b){return XMVectorSet(a.x-b.x,a.y-b.y,a.z-b.z,0);}
 inline XMVECTOR cross(XMVECTOR a,XMVECTOR b){return XMVectorSet(a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x,0);}
 inline float dot(XMVECTOR a,XMVECTOR b){return a.x*b.x+a.y*b.y+a.z*b.z;}
