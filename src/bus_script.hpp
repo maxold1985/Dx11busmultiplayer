@@ -625,10 +625,16 @@ inline std::string findSoundRecursive(const std::string& folder,
 	return found;
 }
 
+struct EventSound {
+	std::string name;
+	SoundSpec sound;
+};
+
 struct ModScripts {
 	DriveProfile manual;
 	DriveProfile automatic;
 	std::vector<SoundSpec> sounds;
+	std::vector<EventSound> eventSounds;
 	std::string root;
 	std::string soundDirectory;
 	std::string soundConfigPath;
@@ -685,6 +691,7 @@ struct ModScripts {
 			}
 
 			sounds = readSounds(descriptor);
+			readEventSounds(descriptor);
 			const Section* soundManager = descriptor.find("sound_manager");
 
 			if(soundManager != 0) {
@@ -723,6 +730,7 @@ struct ModScripts {
 
 		if(!soundPath.empty() && script.load(soundPath)) {
 			sounds = readSounds(script);
+			readEventSounds(script);
 			soundConfigPath = soundPath;
 
 			const Section* manager = script.find("sound_manager");
@@ -750,6 +758,24 @@ struct ModScripts {
 
 		diagnostic = report.str();
 		return true;
+	}
+
+	void readEventSounds(const Ini& ini) {
+		eventSounds.clear();
+		for(size_t i=0;i<ini.sections.size();++i) {
+			const Section& section=ini.sections[i];
+			if(section.name.size()>=5 && section.name.substr(0,5)=="sound")continue;
+			const std::string file=section.get("file");
+			if(file.empty() || !safeRelative(file))continue;
+			EventSound event;
+			event.name=section.name;
+			event.sound.section=section.name;
+			event.sound.file=file;
+			event.sound.whenToPlay=lower(section.get("whentoplay","allcams"));
+			event.sound.volumeMultiplier=bounded(section.number("volume",1.0f),0.0f,2.0f);
+			event.sound.pitchMultiplier=bounded(section.number("pitch",1.0f),0.2f,4.0f);
+			eventSounds.push_back(event);
+		}
 	}
 
 	std::string locateSound(const SoundSpec& sound) const {
