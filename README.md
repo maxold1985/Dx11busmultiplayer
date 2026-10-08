@@ -6,8 +6,9 @@ Projeto C++11 de simulador de onibus multiplayer em DirectX 11, com servidor UDP
 
 - 16 jogadores humanos e 4 veiculos IA no trafego.
 - Simulacao 60 Hz, snapshots UDP 20 Hz, interpolacao visual de estados remotos.
-- Seis rodas com raycasts verticais, molas, amortecedores, arfagem, rolagem e rodas animadas.
+- Suspensao raycast 6 rodas: molas/amortecedores calibrados para 12 t, distribuicao de carga 43/24/33% entre eixos, barra estabilizadora e curso visual no 3DS. Tracao/freios e aderencia consideram a carga de contato das rodas.
 - Colisao OBB/SAT entre onibus e com edificios da cidade procedural.
+- Direcao com Ackermann, esterco progressivo, assistencia em velocidade e resposta de guinada limitada pela aderencia lateral.
 - Cidade com cruzamentos, ruas, predios e seis pontos com passageiros visuais.
 - Porta controlavel, embarque por aproximacao e parada, lotacao 40, indicadores de RPM, marcha, velocidade e rota.
 - Motor sintetico via WinMM, camera externa/interna, texturas por WIC.
