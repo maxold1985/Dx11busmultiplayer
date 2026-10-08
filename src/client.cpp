@@ -689,6 +689,10 @@ static void sendControls() {
 			packet.flags |= INPUT_GEAR_DOWN;
 		}
 
+		if(GetAsyncKeyState(VK_TAB) & 0x8000) {
+			packet.flags |= INPUT_CLUTCH;
+		}
+
 		if(GetAsyncKeyState('G') & 0x8000) {
 			packet.flags |= INPUT_AUTO_GEAR;
 		}
