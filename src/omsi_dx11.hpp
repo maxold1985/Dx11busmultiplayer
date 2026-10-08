@@ -115,7 +115,13 @@ struct GpuMesh {
     std::vector<DrawPart> parts;
     std::vector<Animation> animations;
     float pivot[16];
-    GpuMesh():vertices(0){memset(pivot,0,sizeof(pivot));for(int i=0;i<4;i++)pivot[i*4+i]=1;}
+    int nativeWheel; // -1: no wheel animation; 0..5: FL FR RL2 RR2 RL RR
+    float wheelPivot[3],wheelRadius;
+    GpuMesh():vertices(0),nativeWheel(-1),wheelRadius(0.48f){
+        memset(pivot,0,sizeof(pivot));
+        for(int i=0;i<4;i++)pivot[i*4+i]=1;
+        for(int i=0;i<3;i++)wheelPivot[i]=0.0f;
+    }
 };
 struct Bus {
     std::vector<GpuMesh> meshes;
@@ -272,16 +278,36 @@ inline bool loadNative3DS(ID3D11Device* device,Bus& bus,const MeshEntry& entry){
         if(bus.report.size()<12000)bus.report+="Native 3DS error: "+entry.path+": "+error+"\n";
         return false;
     }
-    unsigned drawable=0;
+    WheelPivot3DS wheelRigs[6];
+    find3DSWheelPivots(meshes,wheelRigs);
+    unsigned drawable=0,animatedParts=0;
     size_t vertices=0,triangles=0;
     for(size_t i=0;i<meshes.size();i++){
         vertices+=meshes[i].vertices.size();
         triangles+=meshes[i].triangles.size();
-        if(upload(device,bus,meshes[i],entry,entry.path))++drawable;
+        const size_t before=bus.meshes.size();
+        if(!upload(device,bus,meshes[i],entry,entry.path))continue;
+        ++drawable;
+        const int wheel=wheelGroup3DS(meshes[i].objectName);
+        if(wheel<0 || !wheelRigs[wheel].valid)continue;
+        for(size_t j=before;j<bus.meshes.size();j++){
+            GpuMesh& gpu=bus.meshes[j];
+            gpu.nativeWheel=wheel;
+            gpu.wheelPivot[0]=wheelRigs[wheel].x;
+            gpu.wheelPivot[1]=wheelRigs[wheel].y;
+            gpu.wheelPivot[2]=wheelRigs[wheel].z;
+            gpu.wheelRadius=wheelRigs[wheel].radius;
+            ++animatedParts;
+        }
     }
     char stats[256];
     sprintf(stats,"Native 3DS: %u/%u meshes on GPU, %u vertices, %u triangles\n",
             drawable,(unsigned)meshes.size(),(unsigned)vertices,(unsigned)triangles);
+    if(bus.report.size()<12000)bus.report+=stats;
+    unsigned detected=0;
+    for(int i=0;i<6;i++)if(wheelRigs[i].valid)++detected;
+    sprintf(stats,"Native 3DS wheels: %u/6 groups, %u animated parts (steer front, spin all)\\n",
+            detected,animatedParts);
     if(bus.report.size()<12000)bus.report+=stats;
     if(drawable==0 && bus.report.size()<12000)
         bus.report+="Native 3DS parsed but no meshes uploaded; inspect Direct3D resources.\n";
@@ -326,6 +352,19 @@ inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
     sprintf(summary,"OMSI: %u meshes loaded; %u missing / unsupported.\n",bus.imported,bus.missing);
     bus.report=std::string(summary)+bus.report;
     return !bus.meshes.empty();
+}
+inline DirectX::XMMATRIX wheelTransform(const GpuMesh& mesh,const BusState& state){
+    using namespace DirectX;
+    if(mesh.nativeWheel<0 || mesh.nativeWheel>5 || mesh.wheelRadius<=0.05f)
+        return identity();
+    const float x=mesh.wheelPivot[0],y=mesh.wheelPivot[1],z=mesh.wheelPivot[2];
+    const float spin=state.wheelRotation*(sim::WHEEL_RADIUS/mesh.wheelRadius);
+    const float steer=mesh.nativeWheel<2?state.steer*0.47f:0.0f;
+    // Row-vector convention: spin around axle X, steer around vertical Y.
+    // Pivots are shared among every part of the same 3DS wheel group.
+    return XMMatrixTranslation(-x,-y,-z)*
+           XMMatrixRotationX(spin)*XMMatrixRotationY(steer)*
+           XMMatrixTranslation(x,y,z);
 }
 inline float variableValue(const std::string& variable,const BusState& state) {
     const std::string v=lower(variable);
