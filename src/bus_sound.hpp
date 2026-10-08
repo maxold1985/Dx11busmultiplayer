@@ -339,6 +339,7 @@ public:
 
 		int missing = 0;
 		int failed = 0;
+		std::string details;
 
 		for(size_t i = 0; i < scripts.sounds.size(); ++i) {
 			if(tracks.size() >= MAX_ENGINE_LAYERS) {
@@ -372,6 +373,7 @@ public:
 
 			if(file.empty()) {
 				++missing;
+				details += "MISSING [" + sound.section + "] " + sound.file + "\\n";
 				continue;
 			}
 
@@ -380,9 +382,14 @@ public:
 
 			if(!loadClip(file, track.clip)) {
 				++failed;
+				details += "DECODE FAILED [" + sound.section + "] " + file + "\n";
 				continue;
 			}
 
+			char sampleInfo[96];
+			sprintf(sampleInfo, " (%u frames, %d Hz)\n",
+				(unsigned)track.clip.mono.size(), track.clip.sampleRate);
+			details += "LOADED [" + sound.section + "] " + file + sampleInfo;
 			tracks.push_back(track);
 		}
 
@@ -398,6 +405,7 @@ public:
 		);
 
 		reportMessage = message;
+		reportMessage += "\n" + details;
 		return !tracks.empty();
 	}
 
