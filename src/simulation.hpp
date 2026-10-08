@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <stdint.h>
 #include "protocol.h"
+#include "bus_script.hpp"
 
 namespace sim {
 static const float PI = 3.14159265358979323846f;
@@ -265,12 +266,16 @@ struct Dynamics {
     float throttle,steering,brake,boardingSeconds;
     float wheelTravel[6],wheelForce[6];
     bool wheelContact[6];
+
+	buscfg::DriveProfile driveAutomatic;
+	buscfg::DriveProfile driveManual;
+	float shiftTimer;
     int boardedAtStop;
     uint32_t lastFlags;
     bool manualGear;
     Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),yawRate(0),lateralSpeed(0),
         throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),
-        lastFlags(0),manualGear(false) {
+        lastFlags(0),manualGear(false),shiftTimer(0.0f) {
         memset(&b,0,sizeof(b));
         b.y=0.40f+WHEEL_RADIUS+SPRING_REST-SUSPENSION_SAG;
         b.gear=1;b.rpm=700;
@@ -281,12 +286,95 @@ struct Dynamics {
         }
     }
 };
+inline void setDriveProfiles(
+	Dynamics& d,
+	const buscfg::DriveProfile& automatic,
+	const buscfg::DriveProfile& manual
+) {
+	d.driveAutomatic = automatic;
+	d.driveManual = manual;
+	d.manualGear = !automatic.valid && manual.valid;
+	d.b.gear = 1;
+	d.shiftTimer = 0.0f;
+
+	if(automatic.valid) {
+		d.b.rpm = automatic.idleRpm;
+	} else if(manual.valid) {
+		d.b.rpm = manual.idleRpm;
+	}
+}
+
+inline const buscfg::DriveProfile* activeDrive(const Dynamics& d) {
+	if(d.manualGear && d.driveManual.valid) {
+		return &d.driveManual;
+	}
+
+	if(!d.manualGear && d.driveAutomatic.valid) {
+		return &d.driveAutomatic;
+	}
+
+	if(d.driveManual.valid) {
+		return &d.driveManual;
+	}
+
+	if(d.driveAutomatic.valid) {
+		return &d.driveAutomatic;
+	}
+
+	return 0;
+}
+
+inline float engineTorque(
+	const buscfg::DriveProfile& config,
+	float rpm
+) {
+	const float low = config.idleRpm;
+	const float peak = config.peakRpm;
+
+	if(rpm <= peak) {
+		const float t = clamp(
+			(rpm - low) / std::max(1.0f, peak - low),
+			0.0f,
+			1.0f
+		);
+
+		return config.idleTorque +
+			(config.peakTorque - config.idleTorque) * t;
+	}
+
+	const float t = clamp(
+		(rpm - peak) / std::max(1.0f, config.maxRpm - peak),
+		0.0f,
+		1.0f
+	);
+
+	return config.peakTorque * (1.0f - 0.40f * t);
+}
+
+inline float drivenRpm(
+	const buscfg::DriveProfile& profile,
+	int gear,
+	float speed
+) {
+	const float circumference = 2.0f * PI * 0.55f;
+	const float revolutionsPerMinute =
+		std::fabs(speed) / circumference * 60.0f;
+
+	return revolutionsPerMinute * profile.gearRatio(gear) *
+		profile.differential;
+}
+
 // Reset executed by the authoritative server; preserve the network identity.
 inline void resetOrigin(Dynamics& dynamics) {
 	const uint32_t savedId = dynamics.b.id;
 	const uint32_t savedSteeringMode = dynamics.b.steeringMode;
+	const buscfg::DriveProfile savedAuto = dynamics.driveAutomatic;
+	const buscfg::DriveProfile savedManual = dynamics.driveManual;
+	const bool savedManualMode = dynamics.manualGear;
 
 	dynamics = Dynamics();
+	setDriveProfiles(dynamics, savedAuto, savedManual);
+	dynamics.manualGear = savedManualMode;
 	dynamics.b.id = savedId;
 	dynamics.b.steeringMode = savedSteeringMode;
 	dynamics.b.x = 0.0f;
@@ -328,17 +416,32 @@ inline void input(
 	}
 
 	if((pressed & INPUT_AUTO_GEAR) != 0) {
-		d.manualGear = false;
+		if(d.driveAutomatic.valid || !d.driveManual.valid) {
+			d.manualGear = false;
+		}
 	}
 
 	if((pressed & INPUT_GEAR_UP) != 0) {
 		d.manualGear = true;
-		d.b.gear = std::min(6, d.b.gear + 1);
+		const buscfg::DriveProfile* profile = activeDrive(d);
+		const int maximum = profile != 0 ? profile->gears : 6;
+		const int next = std::min(maximum, d.b.gear + 1);
+
+		if(next != d.b.gear) {
+			d.b.gear = next;
+			d.shiftTimer = profile != 0 ? profile->shiftSeconds : 0.0f;
+		}
 	}
 
 	if((pressed & INPUT_GEAR_DOWN) != 0) {
 		d.manualGear = true;
-		d.b.gear = std::max(1, d.b.gear - 1);
+		const buscfg::DriveProfile* profile = activeDrive(d);
+		const int next = std::max(1, d.b.gear - 1);
+
+		if(next != d.b.gear) {
+			d.b.gear = next;
+			d.shiftTimer = profile != 0 ? profile->shiftSeconds : 0.0f;
+		}
 	}
 
 	d.lastFlags = flags;
@@ -414,8 +517,49 @@ inline void step(Dynamics& d,float dt) {
     for(int i=0;i<6;i++)if(d.wheelContact[i])contactLoad+=d.wheelForce[i];
     const float grip=clamp(contactLoad/(BUS_MASS*GRAVITY),0.0f,1.0f);
     const float traction=(b.door>0.5f)?0.0f:grip;
-    const float acceleration=(d.throttle>=0?2.6f:1.8f);
-    const float motor=d.throttle*acceleration*traction;
+	const buscfg::DriveProfile* drive = activeDrive(d);
+	const float acceleration = d.throttle >= 0.0f ? 2.6f : 1.8f;
+	float motor = d.throttle * acceleration * traction;
+
+	if(drive != 0) {
+		const float maxRatio = drive->gearRatio(
+			d.throttle < 0.0f ? -1 : b.gear
+		);
+
+		const float rpmFromWheels = drivenRpm(
+			*drive,
+			b.gear,
+			b.speed
+		);
+		const float freeRevTarget =
+			drive->idleRpm + std::fabs(d.throttle) * 380.0f;
+		const float requestedRpm = clamp(
+			std::max(freeRevTarget, rpmFromWheels),
+			drive->idleRpm,
+			drive->maxRpm
+		);
+
+		b.rpm += (requestedRpm - b.rpm) *
+			clamp(frameDt * 5.0f, 0.0f, 1.0f);
+		b.rpm = clamp(b.rpm, drive->idleRpm, drive->maxRpm);
+
+		const float torque = engineTorque(*drive, b.rpm);
+		const float wheelForce =
+			torque * maxRatio * drive->differential * 0.82f / 0.55f;
+
+		const float driveAcceleration = clamp(
+			wheelForce / drive->vehicleMass,
+			0.0f,
+			3.3f
+		);
+
+		motor = d.throttle * driveAcceleration * traction;
+
+		if(d.shiftTimer > 0.0f) {
+			d.shiftTimer = std::max(0.0f, d.shiftTimer - frameDt);
+			motor *= 0.15f;
+		}
+	}
     const float speedAbs=std::fabs(b.speed);
     const float drag=0.0065f*b.speed*speedAbs;
     const float braking=(d.brake*6.5f*grip+0.11f)*(b.speed>0?1.0f:(b.speed<0?-1.0f:0.0f));
@@ -461,12 +605,45 @@ inline void step(Dynamics& d,float dt) {
     b.wheelRotation+=b.speed/WHEEL_RADIUS*frameDt;
     if(std::fabs(b.wheelRotation)>10000.0f)
         b.wheelRotation=std::fmod(b.wheelRotation,2.0f*PI);
-    const float kmh=std::fabs(b.speed)*3.6f;
-    if(!d.manualGear){
-        if(d.throttle>0.0f && b.gear<6 && kmh>b.gear*18.0f)++b.gear;
-        if(b.gear>1 && kmh<(b.gear-1)*15.0f)--b.gear;
-    }
-    b.rpm=clamp(700.0f+kmh*95.0f/std::max(1,b.gear)+std::fabs(d.throttle)*400.0f,700.0f,3400.0f);
+	const float kmh = std::fabs(b.speed) * 3.6f;
+
+	if(drive != 0 && !d.manualGear && drive->automatic) {
+		if(d.shiftTimer <= 0.0f) {
+			if(
+				d.throttle > 0.05f &&
+				b.gear < drive->gears &&
+				b.rpm >= drive->upRpm &&
+				std::fabs(b.speed) >= drive->nextGearMinSpeed
+			) {
+				++b.gear;
+				d.shiftTimer = drive->shiftSeconds;
+			} else if(
+				b.gear > 1 &&
+				b.rpm <= drive->downRpm
+			) {
+				--b.gear;
+				d.shiftTimer = drive->shiftSeconds;
+			}
+		}
+	} else if(drive == 0) {
+		// Built-in fallback when no external gearbox profile is installed.
+		if(!d.manualGear) {
+			if(d.throttle > 0.0f && b.gear < 6 && kmh > b.gear * 18.0f) {
+				++b.gear;
+			}
+
+			if(b.gear > 1 && kmh < (b.gear - 1) * 15.0f) {
+				--b.gear;
+			}
+		}
+
+		b.rpm = clamp(
+			700.0f + kmh * 95.0f / std::max(1, b.gear) +
+			std::fabs(d.throttle) * 400.0f,
+			700.0f,
+			3400.0f
+		);
+	}
     suspension(d,frameDt,accelReal);
     Stop s=stop((int)b.nextStop);
     const float dx=b.x-s.x,dz=b.z-s.z;
