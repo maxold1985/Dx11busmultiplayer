@@ -252,10 +252,15 @@ inline bool readModelList(const std::string& input,std::vector<MeshEntry>& entri
     std::vector<std::string> lines;
     if(!readLines(cfg,lines)){if(error)*error="Nao foi possivel abrir model.cfg: "+cfg;return false;}
     MeshEntry* active=0;Animation* animation=0;
+    int lodLevel=0;
     for(size_t i=0;i<lines.size();i++) {
         const std::string key=lower(trim(lines[i]));
-        if(key=="[mesh]") {
+        if(key=="[lod]") {
+            (void)nextParam(lines,i);
+            ++lodLevel;active=0;animation=0;
+        } else if(key=="[mesh]") {
             const std::string file=nextParam(lines,i);
+            if(lodLevel>1){active=0;animation=0;continue;}
             if(file.empty()||entries.size()>=1500){active=0;animation=0;continue;}
             MeshEntry entry;entry.path=join(directory(cfg),file);
             entries.push_back(entry);
