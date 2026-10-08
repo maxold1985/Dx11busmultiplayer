@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 namespace buscfg {
 
@@ -600,6 +601,30 @@ inline std::vector<SoundSpec> readSounds(const Ini& ini) {
 	return result;
 }
 
+// Search by basename only, bounded to avoid scanning unrelated folders.
+inline std::string findSoundRecursive(const std::string& folder,
+	const std::string& wanted,int depth,int& remaining) {
+	if(depth>6 || remaining<=0)return "";
+	WIN32_FIND_DATAA entry;
+	const HANDLE handle=FindFirstFileA((folder+"*").c_str(),&entry);
+	if(handle==INVALID_HANDLE_VALUE)return "";
+	std::string found;
+	do {
+		if(--remaining<0)break;
+		const std::string name=entry.cFileName;
+		if(name=="." || name=="..")continue;
+		const std::string full=folder+name;
+		if((entry.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0) {
+			found=findSoundRecursive(full+"/",wanted,depth+1,remaining);
+		} else if(lower(name)==wanted) {
+			found=full;
+		}
+		if(!found.empty())break;
+	} while(FindNextFileA(handle,&entry));
+	FindClose(handle);
+	return found;
+}
+
 struct ModScripts {
 	DriveProfile manual;
 	DriveProfile automatic;
@@ -763,7 +788,20 @@ struct ModScripts {
 			}
 		}
 
-		return "";
+		// Fallback for mods with engine sounds scattered through subfolders.
+		// Prefer the full relative path above; basename lookup is ambiguous.
+		const std::string name=lower(basename(normalized));
+		int budget=12000;
+		std::string found=findSoundRecursive(root,name,0,budget);
+		if(found.empty() && name.find('.')==std::string::npos) {
+			budget=12000;
+			found=findSoundRecursive(root,name+".ogg",0,budget);
+			if(found.empty()) {
+				budget=12000;
+				found=findSoundRecursive(root,name+".wav",0,budget);
+			}
+		}
+		return found;
 	}
 };
 
