@@ -98,8 +98,11 @@ struct GpuMesh {
     int wheel;
     float wheelPivot[3],wheelRadius;
     std::string sourcePath;
+    std::vector<omsi::Animation> animations;
+    float pivot[16];
     GpuMesh():vao(0),vbo(0),wheel(-1),wheelRadius(0) {
         wheelPivot[0]=wheelPivot[1]=wheelPivot[2]=0;
+        memset(pivot,0,sizeof(pivot));
     }
 };
 std::vector<GpuMesh> models;
@@ -381,10 +384,13 @@ GLuint bitmapTexture(JNIEnv* env,const std::string& filename) {
     textureCache[filename]=result;
     return result;
 }
-bool appendMesh(const omsi::Mesh& source,const std::string& origin) {
+bool appendMesh(const omsi::Mesh& source,const std::string& origin,
+                const omsi::MeshEntry* entry=0) {
     if(source.vertices.empty()||source.triangles.empty())return false;
     GpuMesh mesh;
     mesh.sourcePath=origin;
+    memcpy(mesh.pivot,source.pivot,sizeof(mesh.pivot));
+    if(entry)mesh.animations=entry->animations;
     mesh.vertices.reserve(source.vertices.size()*5);
     for(size_t v=0;v<source.vertices.size();++v) {
         const omsi::Vertex& p=source.vertices[v];
@@ -488,13 +494,13 @@ bool loadModelFile(const std::string& path) {
         const std::string file=entries[i].path,lower=omsi::lower(file);
         if(lower.size()>=4 && lower.substr(lower.size()-4)==".o3d") {
             omsi::Mesh m;
-            if(omsi::readO3D(file,m,&error)&&appendMesh(m,file))++ok;
+            if(omsi::readO3D(file,m,&error)&&appendMesh(m,file,&entries[i]))++ok;
             else ++failed;
         } else if(lower.size()>=4 && lower.substr(lower.size()-4)==".3ds") {
             std::vector<omsi::Mesh> meshes;
             if(omsi::read3DS(file,meshes,&error)) {
                 for(size_t j=0;j<meshes.size();++j)
-                    if(appendMesh(meshes[j],file))++ok;else ++failed;
+                    if(appendMesh(meshes[j],file,&entries[i]))++ok;else ++failed;
             } else ++failed;
         } else {
             ++failed; // .x, FBX and GLB require an additional importer.
@@ -549,15 +555,47 @@ Mat4 busMatrix(const BusState& b) {
     return mul(translate(b.x,b.y-1.6f,b.z),
         mul(rotateY(b.heading),mul(rotateX(b.pitch),rotateZ(b.roll))));
 }
-Mat4 meshMatrix(const GpuMesh& mesh,const BusState& b,const Mat4& world) {
-    if(mesh.wheel<0||mesh.wheelRadius<0.05f)return world;
-    const float x=mesh.wheelPivot[0],y=mesh.wheelPivot[1],z=mesh.wheelPivot[2];
-    float steer=(mesh.wheel<2)?b.steer*0.5f:0;
-    float spin=b.wheelRotation*(0.48f/mesh.wheelRadius);
-    Mat4 local=mul(translate(x,y,z),mul(rotateY(steer),
-        mul(rotateX(spin),translate(-x,-y,-z))));
-    return mul(world,local);
+float animationValue(const std::string& variable,const BusState& b) {
+    const std::string name=omsi::lower(variable);
+    if(name.find("wheel_rotation_")==0)return b.wheelRotation;
+    if(name.find("axle_steering_")==0)
+        return sim::wheelSteerAngle(b,name.find("_r")!=std::string::npos?1:0);
+    if(name.find("axle_suspension_")==0)return 0.0f;
+    if(name.find("door_")==0)return b.door;
+    if(name.find("cp_lenkrad")==0||name.find("steering")==0)return b.steer;
+    return 0.0f;
 }
+Mat4 meshMatrix(const GpuMesh& mesh,const BusState& b,const Mat4& world) {
+    Mat4 result=world;
+    if(mesh.wheel>=0 && mesh.wheelRadius>=0.05f) {
+        const float x=mesh.wheelPivot[0],y=mesh.wheelPivot[1],z=mesh.wheelPivot[2];
+        const float steer=mesh.wheel<2?sim::wheelSteerAngle(b,mesh.wheel):0.0f;
+        const float spin=b.wheelRotation*(0.48f/mesh.wheelRadius);
+        const Mat4 local=mul(translate(x,y,z),
+            mul(rotateY(steer),mul(rotateX(spin),translate(-x,-y,-z))));
+        result=mul(result,local);
+    }
+    for(size_t i=0;i<mesh.animations.size();++i) {
+        const omsi::Animation& animation=mesh.animations[i];
+        const float value=animationValue(animation.variable,b)*animation.factor;
+        if(fabsf(value)<0.000001f)continue;
+        const float x=animation.fromMesh?mesh.pivot[12]:animation.origin[0];
+        const float y=animation.fromMesh?mesh.pivot[13]:animation.origin[2];
+        const float z=animation.fromMesh?mesh.pivot[14]:animation.origin[1];
+        const float toRadians=0.0174532925199f;
+        const Mat4 basis=mul(rotateX(animation.rot[0]*toRadians),
+            mul(rotateZ(animation.rot[1]*toRadians),rotateY(animation.rot[2]*toRadians)));
+        const Mat4 inverse=mul(rotateY(-animation.rot[2]*toRadians),
+            mul(rotateZ(-animation.rot[1]*toRadians),rotateX(-animation.rot[0]*toRadians)));
+        const Mat4 motion=animation.translation?
+            translate(value,0,0):rotateX(value*toRadians);
+        const Mat4 local=mul(translate(x,y,z),
+            mul(basis,mul(motion,mul(inverse,translate(-x,-y,-z)))));
+        result=mul(result,local);
+    }
+    return result;
+}
+
 struct GlassQueue {size_t mesh,part;float distance;Mat4 matrix;};
 void drawBus(const Mat4& pv,const BusState& b,V3 camera) {
     const Mat4 world=busMatrix(b);
