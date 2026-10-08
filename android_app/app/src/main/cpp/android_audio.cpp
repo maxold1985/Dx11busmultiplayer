@@ -40,24 +40,37 @@ AndroidBusAudio::~AndroidBusAudio() {
     stop();
 }
 bool AndroidBusAudio::loadOgg(const std::vector<unsigned char>& data,Clip& clip) {
-    int channels=0,rate=0;
-    short* decoded=0;
-    const int frames=stb_vorbis_decode_memory(
-        &data[0],(int)data.size(),&channels,&rate,&decoded);
-    if(frames<=1||decoded==0||channels<1||channels>8||rate<6000||rate>192000) {
-        free(decoded);return false;
+    int error=0;
+    stb_vorbis* decoder=stb_vorbis_open_memory(
+        &data[0],(int)data.size(),&error,0);
+    if(!decoder)return false;
+    const stb_vorbis_info info=stb_vorbis_get_info(decoder);
+    const int channels=info.channels,rate=(int)info.sample_rate;
+    if(channels<1||channels>8||rate<6000||rate>192000) {
+        stb_vorbis_close(decoder);
+        return false;
     }
-    const size_t count=std::min((size_t)frames,(size_t)rate*MAX_SECONDS);
-    clip.mono.resize(count);
+    const size_t maxFrames=std::min((size_t)rate*MAX_SECONDS,
+                                    (size_t)480000);
     clip.rate=rate;
-    for(size_t i=0;i<count;++i) {
-        float sum=0;
-        for(int c=0;c<channels;++c)
-            sum+=(float)decoded[i*(size_t)channels+c]/32768.0f;
-        clip.mono[i]=sum/(float)channels;
+    clip.mono.clear();
+    clip.mono.reserve(maxFrames);
+    std::vector<short> buffer((size_t)channels*2048);
+    while(clip.mono.size()<maxFrames) {
+        const int want=(int)std::min((size_t)2048,
+                                     maxFrames-clip.mono.size());
+        const int got=stb_vorbis_get_samples_short_interleaved(
+            decoder,channels,&buffer[0],want*channels);
+        if(got<=0)break;
+        for(int i=0;i<got;++i) {
+            float sum=0;
+            for(int channel=0;channel<channels;++channel)
+                sum+=(float)buffer[(size_t)i*channels+channel]/32768.0f;
+            clip.mono.push_back(sum/channels);
+        }
     }
-    free(decoded);
-    return true;
+    stb_vorbis_close(decoder);
+    return clip.mono.size()>1;
 }
 bool AndroidBusAudio::loadWav(const std::vector<unsigned char>& bytes,Clip& clip) {
     if(bytes.size()<44||memcmp(&bytes[0],"RIFF",4)!=0||
@@ -114,6 +127,8 @@ bool AndroidBusAudio::load(const buscfg::ModScripts& config) {
     stop();
     std::vector<Track> loops,events;
     unsigned missing=0,bad=0,skipped=0;
+    size_t totalDecodedSamples=0;
+    const size_t MAX_TOTAL_DECODED_SAMPLES=24u*1024u*1024u;
     for(size_t i=0;i<config.sounds.size();++i) {
         if(loops.size()>=(size_t)MAX_LOOPS)break;
         const buscfg::SoundSpec& sound=config.sounds[i];
@@ -137,6 +152,10 @@ bool AndroidBusAudio::load(const buscfg::ModScripts& config) {
         const std::string path=config.locateSound(t.spec);
         if(path.empty()) {++missing;continue;}
         if(!loadClip(path,t.clip)) {++bad;continue;}
+        if(t.clip.mono.size()>MAX_TOTAL_DECODED_SAMPLES-totalDecodedSamples) {
+            ++skipped;continue;
+        }
+        totalDecodedSamples+=t.clip.mono.size();
         loops.push_back(t);
     }
     for(size_t i=0;i<config.eventSounds.size();++i) {
@@ -145,6 +164,10 @@ bool AndroidBusAudio::load(const buscfg::ModScripts& config) {
         const std::string path=config.locateSound(t.spec);
         if(path.empty()) {++missing;continue;}
         if(!loadClip(path,t.clip)) {++bad;continue;}
+        if(t.clip.mono.size()>MAX_TOTAL_DECODED_SAMPLES-totalDecodedSamples) {
+            ++skipped;continue;
+        }
+        totalDecodedSamples+=t.clip.mono.size();
         events.push_back(t);
     }
     {
