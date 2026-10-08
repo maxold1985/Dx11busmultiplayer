@@ -48,6 +48,9 @@ static sockaddr_in serverAddress={};
 static uint32_t myId=0,lastTick=0;
 static const int WIDTH=1280,HEIGHT=720;
 static XMMATRIX cameraMatrix;
+static float orbitYaw=0.0f,orbitPitch=0.38f,orbitDistance=16.0f;
+static bool orbitDragging=false;
+static POINT orbitLast={0,0};
 static MotorAudio motor;
 struct Snapshot {
     BusState buses[MAX_BUSES];
@@ -348,7 +351,12 @@ static void drawFrame(){
         eye=XMVectorSet(focus.x+sine*2.90f,focus.y+1.38f,focus.z+cosine*2.90f,1);
         at=XMVectorSet(focus.x+sine*35.0f,focus.y+1.20f,focus.z+cosine*35.0f,1);
     } else {
-        eye=XMVectorSet(focus.x-sine*15.0f,focus.y+8.5f,focus.z-cosine*15.0f,1);
+        // Orbit camera: right mouse drag rotates around the bus; wheel zooms.
+        const float angle=focus.heading+orbitYaw;
+        const float horizontal=orbitDistance*cosf(orbitPitch);
+        eye=XMVectorSet(focus.x-sinf(angle)*horizontal,
+                        focus.y+0.45f+orbitDistance*sinf(orbitPitch),
+                        focus.z-cosf(angle)*horizontal,1);
         at=XMVectorSet(focus.x,focus.y+0.45f,focus.z,1);
     }
     cameraMatrix=XMMatrixLookAtLH(eye,at,XMVectorSet(0,1,0,0))*
@@ -364,7 +372,7 @@ static void drawFrame(){
         if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
             sprintf(title,"DX11 Bus | Sem resposta do servidor ha mais de 3 segundos");
         else if(latest.count>0)
-            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera E porta Q/Z manual G auto",
+            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera | RMB orbita | roda zoom | E porta Q/Z manual G auto",
                myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
                (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count);
         else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
@@ -455,6 +463,30 @@ static void browseOmsiModel(HWND hwnd){
 
 static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_DESTROY){running=false;PostQuitMessage(0);return 0;}
+    if(msg==WM_RBUTTONDOWN){
+        orbitDragging=true;
+        orbitLast.x=GET_X_LPARAM(l);orbitLast.y=GET_Y_LPARAM(l);
+        SetCapture(hwnd);
+        return 0;
+    }
+    if(msg==WM_MOUSEMOVE && orbitDragging){
+        const int mx=GET_X_LPARAM(l),my=GET_Y_LPARAM(l);
+        orbitYaw+=(mx-orbitLast.x)*0.006f;
+        orbitPitch=sim::clamp(orbitPitch+(my-orbitLast.y)*0.005f,-0.18f,1.35f);
+        orbitLast.x=mx;orbitLast.y=my;
+        return 0;
+    }
+    if(msg==WM_RBUTTONUP){
+        orbitDragging=false;
+        if(GetCapture()==hwnd)ReleaseCapture();
+        return 0;
+    }
+    if(msg==WM_CAPTURECHANGED){orbitDragging=false;return 0;}
+    if(msg==WM_MOUSEWHEEL){
+        const int delta=GET_WHEEL_DELTA_WPARAM(w);
+        orbitDistance=sim::clamp(orbitDistance*(delta>0?0.88f:1.12f),4.0f,45.0f);
+        return 0;
+    }
     if(msg==WM_KEYDOWN){
         if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}
         if(w==VK_F1 && !((l>>30)&1)){cockpit=!cockpit;return 0;}
