@@ -248,6 +248,10 @@ public final class BusActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this,message,Toast.LENGTH_SHORT).show();
     }
+    @Override protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
     @Override protected void onPause() {
         forward=reverse=left=right=brake=clutch=false;
         surface.queueEvent(() -> nativeControls(0,0,0,0));
@@ -273,6 +277,8 @@ public final class BusActivity extends Activity {
                     String rootId=DocumentsContract.getTreeDocumentId(uri);
                     copyTree(uri,rootId,folder,counter,0);
                     ImportSelection selection=new ImportSelection();
+                    importedModel="";
+                    importedScript="";
                     findCandidates(folder,selection);
                     if(selection.model!=null) importedModel=selection.model.getAbsolutePath();
                     if(selection.script!=null) importedScript=selection.script.getAbsolutePath();
