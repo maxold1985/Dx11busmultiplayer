@@ -13,6 +13,7 @@
 #include "omsi_dx11.hpp"
 #include <commdlg.h>
 #include <windows.h>
+#include <windowsx.h>
 #include <d3d11.h>
 #include <stdio.h>
 #include <vector>
