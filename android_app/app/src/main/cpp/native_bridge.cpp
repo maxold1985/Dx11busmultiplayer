@@ -125,10 +125,13 @@ uint32_t playerId=0,lastTick=0,pendingFlags=0;
 uint64_t lastSend=0,lastReceived=0,flagUntil=0;
 float throttle=0,steering=0,brake=0,clutch=0;
 float orbitYaw=0,orbitPitch=0.32f,orbitDistance=17.0f;
-std::string modelStatus="Modelo padrao",scriptStatus="Nenhum script",networkStatus="Desconectado";
+std::string modelStatus="Modelo padrao",scriptStatus="Nenhum script",networkStatus="Modo offline";
 std::string modelRoot;
 bool imported=false;
 buscfg::ModScripts scripts;
+sim::Dynamics offlineDynamics;
+uint64_t offlineAt=0;
+double offlineAccumulator=0.0;
 AndroidBusAudio audio;
 int previousAudioGear=0;
 bool previousAudioBrake=false;
@@ -788,6 +791,21 @@ void initGrid() {
     glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(3*sizeof(float)));
     glBindVertexArray(0);
 }
+void updateOffline() {
+    const uint64_t now=androidnet::millis();
+    if(offlineAt==0)offlineAt=now;
+    const uint64_t delta=now>=offlineAt?now-offlineAt:0;
+    offlineAt=now;
+    offlineAccumulator+=std::min((double)delta*0.001,0.1);
+    uint32_t flags=pendingFlags;
+    if(clutch>0.5f)flags|=INPUT_CLUTCH;
+    sim::input(offlineDynamics,throttle,steering,brake,flags);
+    if(pendingFlags && now>=flagUntil)pendingFlags=0;
+    while(offlineAccumulator>=1.0/60.0) {
+        sim::step(offlineDynamics,1.0f/60.0f);
+        offlineAccumulator-=1.0/60.0;
+    }
+}
 void updateNetwork() {
     if(!connected || socketFd<0)return;
     const uint64_t now=androidnet::millis();
@@ -903,6 +921,7 @@ BusState smoothBus(uint32_t id) {
 }
 BusState focusBus() {
     if(gotSnapshot)return smoothBus(playerId);
+    if(!connected)return offlineDynamics.b;
     BusState bus={};
     bus.y=1.6f;
     bus.rpm=700.0f;
@@ -936,7 +955,8 @@ Java_com_dx11bus_android_BusActivity_nativeResize(JNIEnv*,jclass,jint w,jint h) 
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeDraw(JNIEnv* env,jclass) {
-    updateNetwork();
+    if(connected)updateNetwork();
+    else updateOffline();
     glViewport(0,0,viewportW,viewportH);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     if(!program)return;
@@ -983,6 +1003,19 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_dx11bus_android_BusActivity_nativeConnect(JNIEnv* env,jclass,jstring ip) {
     return connectTo(fromJava(env,ip))?JNI_TRUE:JNI_FALSE;
 }
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeDisconnect(JNIEnv*,jclass) {
+    if(socketFd>=0)close(socketFd);
+    socketFd=-1;
+    connected=false;
+    gotSnapshot=false;
+    hasPreviousSnapshot=false;
+    playerId=0;
+    lastTick=0;
+    networkStatus="Modo offline";
+    offlineAt=0;
+    offlineAccumulator=0.0;
+}
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_dx11bus_android_BusActivity_nativeLoadModel(JNIEnv* env,jclass,jstring file) {
     const bool result=loadModelFile(fromJava(env,file));
@@ -995,6 +1028,8 @@ Java_com_dx11bus_android_BusActivity_nativeLoadScript(JNIEnv* env,jclass,jstring
         const bool samplesLoaded=audio.load(scripts);
         audio.start();
         scriptStatus=scripts.diagnostic+" | "+audio.report();
+        if(!connected && (scripts.hasAutomatic || scripts.hasManual))
+            sim::setDriveProfiles(offlineDynamics,scripts.automatic,scripts.manual);
         return JNI_TRUE;
     }
     scriptStatus="Script nao carregado: "+scripts.diagnostic;
