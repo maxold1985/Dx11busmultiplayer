@@ -788,6 +788,24 @@ struct ModScripts {
 			}
 		}
 
+		// Known filename differences in the supplied Marcopolo O400 pack.
+		// Restrict aliases to the Mercedes Benz O400 engine directory.
+		const std::string enginePrefix="o-400/mercedes benz o400/";
+		const std::string requested=lower(normalized);
+		if(requested.substr(0,enginePrefix.size())==enginePrefix) {
+			const std::string requestedName=lower(basename(normalized));
+			const char* alias=0;
+			if(requestedName=="1i.ogg")alias="x1i.ogg";
+			else if(requestedName=="3i.ogg")alias="x3ii.ogg";
+			else if(requestedName=="4i.ogg")alias="x4ii.ogg";
+			else if(requestedName=="5i" || requestedName=="5i.ogg")alias="x5.ogg";
+			else if(requestedName=="2ianovo.ogg")alias="x2iii.ogg";
+			if(alias!=0) {
+				const std::string replacement=root+"O-400/Mercedes Benz O400/"+alias;
+				if(exists(replacement))return replacement;
+			}
+		}
+
 		// Fallback for mods with engine sounds scattered through subfolders.
 		// Prefer the full relative path above; basename lookup is ambiguous.
 		const std::string name=lower(basename(normalized));
