@@ -215,11 +215,132 @@ std::string resolveTexture(const std::string& meshPath,const std::string& filena
         if(exists(candidates[i]))return candidates[i];
     return "";
 }
+// OMSI frequently uses DDS DXT1/DXT3/DXT5 textures, which BitmapFactory
+// cannot open. Decode only the top mip level to standard RGBA on the CPU.
+uint32_t readU32(const std::vector<uint8_t>& d,size_t p) {
+    return (uint32_t)d[p]|((uint32_t)d[p+1]<<8)|
+        ((uint32_t)d[p+2]<<16)|((uint32_t)d[p+3]<<24);
+}
+unsigned expand565(unsigned value,unsigned shift,unsigned bits) {
+    return ((value>>shift)&((1u<<bits)-1u))*255u/((1u<<bits)-1u);
+}
+GLuint uploadRGBA(const std::vector<unsigned char>& pixels,int w,int h) {
+    if(pixels.empty() || w<=0 || h<=0)return 0;
+    GLuint tex=0;
+    glGenTextures(1,&tex);
+    glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,&pixels[0]);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    return tex;
+}
+GLuint ddsTexture(const std::string& path) {
+    std::vector<uint8_t> bytes;
+    if(!omsi::loadBytes(path,bytes,128u*1024u*1024u) || bytes.size()<128 ||
+       memcmp(&bytes[0],"DDS ",4)!=0 || readU32(bytes,4)!=124)return 0;
+    const unsigned h=readU32(bytes,12),w=readU32(bytes,16);
+    if(w==0||h==0||w>8192||h>8192)return 0;
+    const uint32_t fourcc=readU32(bytes,84),bits=readU32(bytes,88);
+    std::vector<unsigned char> pixels((size_t)w*h*4,255);
+    const uint32_t dxt1=0x31545844u,dxt3=0x33545844u,dxt5=0x35545844u;
+    if(fourcc==dxt1||fourcc==dxt3||fourcc==dxt5) {
+        const size_t blocksX=(w+3)/4,blocksY=(h+3)/4;
+        const size_t blockSize=fourcc==dxt1?8:16;
+        if(blocksX*blocksY*blockSize>bytes.size()-128)return 0;
+        for(size_t by=0;by<blocksY;++by)for(size_t bx=0;bx<blocksX;++bx) {
+            const uint8_t* p=&bytes[128+(by*blocksX+bx)*blockSize];
+            const uint8_t* colors=p+(fourcc==dxt1?0:8);
+            const unsigned a=(unsigned)colors[0]|((unsigned)colors[1]<<8);
+            const unsigned b=(unsigned)colors[2]|((unsigned)colors[3]<<8);
+            unsigned palette[4][4]={{0}};
+            for(int k=0;k<3;++k) {
+                const unsigned shift=k==0?11:(k==1?5:0);
+                const unsigned bits565=k==1?6:5;
+                palette[0][k]=expand565(a,shift,bits565);
+                palette[1][k]=expand565(b,shift,bits565);
+            }
+            palette[0][3]=palette[1][3]=255;
+            if(a>b || fourcc!=dxt1) {
+                for(int k=0;k<3;++k) {
+                    palette[2][k]=(2*palette[0][k]+palette[1][k])/3;
+                    palette[3][k]=(palette[0][k]+2*palette[1][k])/3;
+                }
+                palette[2][3]=palette[3][3]=255;
+            } else {
+                for(int k=0;k<3;++k) {
+                    palette[2][k]=(palette[0][k]+palette[1][k])/2;
+                    palette[3][k]=0;
+                }
+                palette[2][3]=255;palette[3][3]=0;
+            }
+            uint32_t indices=(uint32_t)colors[4]|((uint32_t)colors[5]<<8)|
+                ((uint32_t)colors[6]<<16)|((uint32_t)colors[7]<<24);
+            unsigned alphas[8]={255,255,0,0,0,0,0,0};
+            uint64_t alphaBits=0;
+            if(fourcc==dxt5) {
+                alphas[0]=p[0];alphas[1]=p[1];
+                if(alphas[0]>alphas[1]) {
+                    for(int i=2;i<8;++i)
+                        alphas[i]=((8-i)*alphas[0]+(i-1)*alphas[1])/7;
+                } else {
+                    for(int i=2;i<6;++i)
+                        alphas[i]=((6-i)*alphas[0]+(i-1)*alphas[1])/5;
+                    alphas[6]=0;alphas[7]=255;
+                }
+                for(int i=0;i<6;++i)alphaBits|=((uint64_t)p[2+i])<<(8*i);
+            }
+            for(unsigned yy=0;yy<4;++yy)for(unsigned xx=0;xx<4;++xx) {
+                const size_t x=bx*4+xx,y=by*4+yy;
+                if(x>=w||y>=h)continue;
+                const int pixel=(int)(yy*4+xx);
+                const unsigned index=(indices>>(2*pixel))&3u;
+                const size_t out=(y*w+x)*4;
+                for(int k=0;k<4;++k)pixels[out+k]=(unsigned char)palette[index][k];
+                if(fourcc==dxt3) {
+                    pixels[out+3]=(unsigned char)(
+                        ((p[pixel/2]>>(4*(pixel%2)))&15u)*17u);
+                } else if(fourcc==dxt5) {
+                    pixels[out+3]=(unsigned char)alphas[(alphaBits>>(3*pixel))&7u];
+                }
+            }
+        }
+    } else if(fourcc==0 && bits==32) {
+        if((size_t)w*h*4>bytes.size()-128)return 0;
+        const uint32_t masks[4]={
+            readU32(bytes,92),readU32(bytes,96),
+            readU32(bytes,100),readU32(bytes,104)
+        };
+        for(size_t i=0;i<(size_t)w*h;++i) {
+            const uint32_t pixel=readU32(bytes,128+i*4);
+            for(int k=0;k<4;++k) {
+                const uint32_t mask=masks[k];
+                if(mask==0) {
+                    pixels[i*4+k]=(unsigned char)(k==3?255:0);
+                    continue;
+                }
+                unsigned shift=0;
+                while(shift<32 && (mask&(1u<<shift))==0)++shift;
+                const uint32_t range=mask>>shift;
+                pixels[i*4+k]=(unsigned char)(((uint64_t)((pixel&mask)>>shift)*255u)/range);
+            }
+        }
+    } else return 0;
+    return uploadRGBA(pixels,(int)w,(int)h);
+}
 GLuint bitmapTexture(JNIEnv* env,const std::string& filename) {
     if(filename.empty())return 0;
     std::map<std::string,GLuint>::iterator found=textureCache.find(filename);
     if(found!=textureCache.end())return found->second;
     GLuint result=0;
+    const std::string low=omsi::lower(filename);
+    if(low.size()>=4 && low.substr(low.size()-4)==".dds") {
+        result=ddsTexture(filename);
+        textureCache[filename]=result;
+        return result;
+    }
     jclass factory=env->FindClass("android/graphics/BitmapFactory");
     if(!factory) {env->ExceptionClear();return 0;}
     jmethodID decode=env->GetStaticMethodID(factory,"decodeFile","(Ljava/lang/String;)Landroid/graphics/Bitmap;");
