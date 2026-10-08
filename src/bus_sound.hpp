@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -334,9 +335,7 @@ public:
 		tracks.clear();
 		reportMessage.clear();
 
-		maximumRpm = scripts.hasAutomatic ?
-			scripts.automatic.maxRpm :
-			(scripts.hasManual ? scripts.manual.maxRpm : 3000.0f);
+		maximumRpm = scripts.soundMaxRpm;
 
 		int missing = 0;
 		int failed = 0;
@@ -347,6 +346,14 @@ public:
 			}
 
 			const buscfg::SoundSpec& sound = scripts.sounds[i];
+
+			// Only the first engine/gearbox layers are looping samples.
+			// Later [soundN] entries often represent doors, buttons, horns,
+			// and other events and must not loop continuously.
+			const int number = atoi(sound.section.c_str() + 5);
+			if(number < 1 || number > 18) {
+				continue;
+			}
 
 			if(sound.volumeMultiplier < 0.001f) {
 				continue;
@@ -462,6 +469,7 @@ public:
 		for(int i = 0; i < BUFFER_COUNT; ++i) {
 			if((headers[i].dwFlags & WHDR_DONE) != 0) {
 				fill(i);
+				headers[i].dwFlags &= ~WHDR_DONE;
 
 				waveOutWrite(
 					output,
