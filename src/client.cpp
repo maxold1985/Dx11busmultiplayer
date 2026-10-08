@@ -15,7 +15,7 @@
 using namespace DirectX;
 
 struct SceneConstants {XMFLOAT4X4 transform;XMFLOAT4 color;XMFLOAT4 flags;};
-static HWND windowHandle=0,ipInput=0,connectButton=0;
+static HWND windowHandle=0,ipLabel=0,ipInput=0,connectButton=0;
 static ID3D11Device* device=0;
 static ID3D11DeviceContext* context=0;
 static IDXGISwapChain* swapChain=0;
@@ -314,8 +314,10 @@ static void drawFrame(){
     motor.update(focus.rpm);
     if(connected && GetTickCount()-lastHud>250) {
         char title[512];
-        if(latest.count>0)
-            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Jogadores %u | F1 camera E porta Q/Z marcha",
+        if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
+            sprintf(title,"DX11 Bus | Sem resposta do servidor ha mais de 3 segundos");
+        else if(latest.count>0)
+            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera E porta Q/Z marcha",
                myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
                (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count);
         else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
@@ -367,7 +369,7 @@ static bool connectTo(const char* ipv4) {
     }
     u_long nonBlocking=1;ioctlsocket(socketUdp,FIONBIO,&nonBlocking);
     connected=true;myId=0;gotSnapshot=false;lastTick=0;earlier=Snapshot();latest=Snapshot();
-    ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
+    ShowWindow(ipLabel,SW_HIDE);ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
     motor.start();
     return true;
 }
@@ -395,7 +397,7 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
     windowHandle=CreateWindowA(wc.lpszClassName,"DX11 Bus Multiplayer | Digite o IP para conectar",style,
         CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,0,0,instance,0);
     if(!windowHandle)return 1;
-    CreateWindowA("STATIC","IP do servidor:",WS_CHILD|WS_VISIBLE,22,18,120,25,windowHandle,0,instance,0);
+    ipLabel=CreateWindowA("STATIC","IP do servidor:",WS_CHILD|WS_VISIBLE,22,18,120,25,windowHandle,0,instance,0);
     ipInput=CreateWindowExA(WS_EX_CLIENTEDGE,"EDIT","127.0.0.1",WS_CHILD|WS_VISIBLE|ES_AUTOHSCROLL,
          140,14,180,27,windowHandle,(HMENU)101,instance,0);
     connectButton=CreateWindowA("BUTTON","Conectar",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
