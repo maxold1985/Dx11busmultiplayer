@@ -57,7 +57,7 @@ internos do OMSI 2:
   **Cada jogador alterna apenas o seu proprio onibus.**
 - O comando `R` (reset para origem) preserva o modo de direcao escolhido.
 
-O protocolo de rede passa para `BUS3` com o novo campo serializado.
+O protocolo de rede usa `BUS4` para sincronizar direcao e modo de transmissao.
 **Recompile e reinicie o servidor e todos os clientes**, pois versoes
 anteriores nao sao compativeis com este protocolo.
 
