@@ -9,7 +9,8 @@ Projeto C++11 de simulador de onibus multiplayer em DirectX 11, com servidor UDP
 - Suspensao raycast 6 rodas: molas/amortecedores calibrados para 12 t, distribuicao de carga 43/24/33% entre eixos, barra estabilizadora e curso visual no 3DS. Tracao/freios e aderencia consideram a carga de contato das rodas.
 - Colisao OBB/SAT entre onibus e com edificios da cidade procedural.
 - Direcao com Ackermann, esterco progressivo, assistencia em velocidade e resposta de guinada limitada pela aderencia lateral.
-- Cidade com cruzamentos, ruas, predios e seis pontos com passageiros visuais.
+- Cidade procedural ampliada para 4,08 km x 4,08 km, com ruas a cada 60 m, predios renderizados apenas perto do onibus e 28 paradas de passageiros.
+- Reset de posicao na origem (0, 0) pela tecla R ou botao, executado no servidor sem desconectar o jogador; indicador de coordenadas X/Z na janela.
 - Porta controlavel, embarque por aproximacao e parada, lotacao 40, indicadores de RPM, marcha, velocidade e rota.
 - Motor sintetico via WinMM, camera externa/interna, texturas por WIC.
 - Importador opcional Assimp para GLB/FBX com texturas externas e embutidas.
@@ -28,7 +29,9 @@ Para importar modelos GLB/FBX instale Assimp compilado para i686 com ABI compati
 
 Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.exe. Na janela digite o IPv4 do servidor, como 127.0.0.1. Para outros computadores, use o IPv4 da rede local, liberando porta UDP 27015 no firewall. Pode executar bus_client.exe 192.168.1.10 para conectar diretamente.
 
-Detalhes e parametros de ajuste: [suspensao e direcao](docs/SUSPENSION_STEERING.md).
+Detalhes: [suspensao e direcao](docs/SUSPENSION_STEERING.md), [mapa ampliado e reset de origem](docs/MAP_ORIGIN.md).
+
+Codigo C++11 tabulado, com convencoes de formatacao em [.clang-format](.clang-format).
 
 ## Controles
 
@@ -40,6 +43,8 @@ Detalhes e parametros de ajuste: [suspensao e direcao](docs/SUSPENSION_STEERING.
 | E | Porta (com onibus parado) |
 | Q / Z | Marcha manual acima / abaixo |
 | G | Retomar cambio automatico |
+| R | Resetar onibus para origem (X=0, Z=0) |
+| Botao Reset origem (R) | Alternativa ao teclado |
 | F1 | Camera interna / externa |
 | Botao direito do mouse + arrastar | Orbitar camera externa |
 | Roda do mouse | Zoom da camera externa |
@@ -47,7 +52,7 @@ Detalhes e parametros de ajuste: [suspensao e direcao](docs/SUSPENSION_STEERING.
 
 ## Carregamento nativo de modelos OMSI 2 / openOMSI
 
-O cliente DX11 aceita modelos proprios de OMSI 2 por meio de `.bus` -> `model.cfg` -> `.o3d` (sem Assimp). Abra `bus_client.exe` e use o botao **Carregar OMSI (.bus)**; escolha o .bus dentro da instalacao OMSI 2. Tambem aceita diretamente `.cfg`, `.o3d` e `.3ds`. Texturas `.bmp`, `.png`, `.jpg`, `.tga` e `.dds` (BC1/2/3) sao carregadas do diretorio do onibus. `.3ds` e carregado nativamente (sem Assimp). Apenas `.x` requer Assimp i686 opcional (`BUS_WITH_ASSIMP=ON`). O arquivo `omsi_import.log` lista malhas nao carregadas.
+O cliente DX11 aceita modelos proprios de OMSI 2 por meio de `.bus` -> `model.cfg` -> `.o3d` (sem Assimp). Abra `bus_client.exe` e use o botao **Carregar OMSI (.bus/.3ds)**; escolha o .bus dentro da instalacao OMSI 2. Tambem aceita diretamente `.cfg`, `.o3d` e `.3ds`. Texturas `.bmp`, `.png`, `.jpg`, `.tga` e `.dds` (BC1/2/3) sao carregadas do diretorio do onibus. `.3ds` e carregado nativamente (sem Assimp). Apenas `.x` requer Assimp i686 opcional (`BUS_WITH_ASSIMP=ON`). O arquivo `omsi_import.log` lista malhas nao carregadas.
 
 O mesmo modelo carregado neste cliente representa todos os onibus visiveis por ele. No `.3ds`, rodas nomeadas `wheel_fl/fr/rl2/rr2/rl/rr` giram conforme o deslocamento e as dianteiras estercam com a direcao. Animacoes de rodas, suspensao e portas estao mapeadas parcialmente; scripts, sistema HOF/IBIS, CTI e logica completa de OMSI ainda nao sao executados. Detalhes em [docs/OMSI_COMPAT.md](docs/OMSI_COMPAT.md). Nenhum conteudo original de OMSI acompanha este projeto.
 
