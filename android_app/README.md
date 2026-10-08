@@ -8,7 +8,7 @@ não foram substituídos. O Android mantém o protocolo multiplayer BUS4
 ## Gerar e instalar o APK
 
 1. Abra a pasta `android_app/` no Android Studio.
-2. Instale **JDK 17**, **Android SDK 35**, **NDK 27.2.12479018**
+2. Instale **JDK 17**, **Android SDK 35**, **NDK 27.0.12077973**
    e **CMake 3.22.1**.
 3. Configure **Gradle 8.7**; se não existir o Gradle Wrapper, use a
    distribuição local do Gradle ou execute
