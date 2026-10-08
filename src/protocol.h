@@ -13,8 +13,9 @@ static const int MAX_PLAYERS = 16;
 static const int AI_BUSES = 4;
 static const int MAX_BUSES = MAX_PLAYERS + AI_BUSES;
 
-// BUS2: all clients and the authoritative server must use this protocol.
-static const uint32_t BUS_MAGIC = 0x42555332;
+// BUS3: steeringMode is now included in every replicated BusState.
+// Rebuild both server and client together; previous protocol is incompatible.
+static const uint32_t BUS_MAGIC = 0x42555333;
 
 enum PacketType {
 	PACKET_INPUT = 1,
@@ -26,7 +27,13 @@ enum InputFlags {
 	INPUT_GEAR_UP = 2,
 	INPUT_GEAR_DOWN = 4,
 	INPUT_AUTO_GEAR = 8,
-	INPUT_RESET_ORIGIN = 16
+	INPUT_RESET_ORIGIN = 16,
+	INPUT_TOGGLE_OMSI_STEERING = 32
+};
+
+enum SteeringMode {
+	STEERING_CLASSIC = 0,
+	STEERING_OMSI_APPROX = 1
 };
 
 #pragma pack(push, 1)
@@ -51,6 +58,7 @@ struct BusState {
 
 	uint32_t passengers;
 	uint32_t nextStop;
+	uint32_t steeringMode;
 };
 
 struct NetPacket {
