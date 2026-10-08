@@ -426,7 +426,7 @@ static void browseOmsiModel(HWND hwnd){
     OPENFILENAMEA chooser={};chooser.lStructSize=sizeof(chooser);
     chooser.hwndOwner=hwnd;
     chooser.lpstrFile=filename;chooser.nMaxFile=MAX_PATH;
-    chooser.lpstrFilter="OMSI bus and model (*.bus;*.ovh;*.cfg;*.o3d)\0*.bus;*.ovh;*.cfg;*.o3d\0All files (*.*)\0*.*\0";
+    chooser.lpstrFilter="OMSI bus and model (*.bus;*.ovh;*.cfg;*.o3d;*.3ds;*.x)\0*.bus;*.ovh;*.cfg;*.o3d;*.3ds;*.x\0All files (*.*)\0*.*\0";
     chooser.nFilterIndex=1;
     chooser.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
     if(!GetOpenFileNameA(&chooser))return;
