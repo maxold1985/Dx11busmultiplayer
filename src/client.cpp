@@ -58,6 +58,7 @@ static ID3D11ShaderResourceView* roadTexture=0;
 static ID3D11ShaderResourceView* busTexture=0;
 static ModelAsset busModel;
 static omsi::Bus omsiBus;
+static bool glassDiagnostic=false;
 static bool useOmsi=false;
 static bool useModel=false,connected=false,running=true,cockpit=false;
 static SOCKET socketUdp=INVALID_SOCKET;
@@ -326,9 +327,14 @@ static void drawOmsiBus(const BusState& b) {
         const UINT stride=sizeof(MeshVertex);
         const UINT offset=0;
         context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
-        setWorld(world,XMFLOAT4(
-            part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]
-        ),part.texture);
+        if(glassDiagnostic) {
+            // Uniform cyan glass, no sampled texture: isolates texture artifacts.
+            setWorld(world,XMFLOAT4(0.18f,0.75f,0.85f,0.22f),0);
+        } else {
+            setWorld(world,XMFLOAT4(
+                part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]
+            ),part.texture);
+        }
         context->IASetIndexBuffer(part.indices,DXGI_FORMAT_R32_UINT,0);
         context->DrawIndexed(part.count,0,0);
     }
@@ -1028,6 +1034,11 @@ static LRESULT CALLBACK windowProcedure(
 
 		if(w == VK_ESCAPE) {
 			DestroyWindow(hwnd);
+			return 0;
+		}
+
+		if(w == VK_F6 && firstKeyDown) {
+			glassDiagnostic = !glassDiagnostic;
 			return 0;
 		}
 
