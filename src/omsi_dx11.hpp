@@ -206,15 +206,74 @@ inline bool upload(ID3D11Device* device,Bus& bus,const Mesh& mesh,
     if(gpu.parts.empty()){gpu.vertices->Release();return false;}
     bus.meshes.push_back(gpu);return true;
 }
+#ifdef BUS_HAS_ASSIMP
+inline bool loadDirectXModel(ID3D11Device* device,Bus& bus,const MeshEntry& entry) {
+    // Arquivos .x de alguns addons OMSI sao carregados apenas com Assimp habilitado.
+    Assimp::Importer importer;
+    const aiScene* scene=importer.ReadFile(entry.path,
+        aiProcess_Triangulate|aiProcess_PreTransformVertices|
+        aiProcess_JoinIdenticalVertices|aiProcess_FlipUVs);
+    if(!scene||!scene->HasMeshes())return false;
+    bool any=false;
+    for(unsigned m=0;m<scene->mNumMeshes;m++) {
+        const aiMesh* src=scene->mMeshes[m];
+        if(!src||!src->HasPositions()||!src->HasFaces()||
+           src->mNumVertices>1500000)continue;
+        Mesh mesh;mesh.vertices.resize(src->mNumVertices);
+        mesh.materials.resize(1);
+        if(src->mMaterialIndex<scene->mNumMaterials){
+            aiMaterial* material=scene->mMaterials[src->mMaterialIndex];
+            aiString filename;
+            if(material->GetTexture(aiTextureType_DIFFUSE,0,&filename)==AI_SUCCESS)
+                mesh.materials[0].texture=filename.C_Str();
+            aiColor4D diffuse;
+            if(aiGetMaterialColor(material,AI_MATKEY_COLOR_DIFFUSE,&diffuse)==AI_SUCCESS) {
+                mesh.materials[0].rgba[0]=diffuse.r;
+                mesh.materials[0].rgba[1]=diffuse.g;
+                mesh.materials[0].rgba[2]=diffuse.b;
+                mesh.materials[0].rgba[3]=diffuse.a;
+            }
+        }
+        for(unsigned v=0;v<src->mNumVertices;v++) {
+            Vertex& out=mesh.vertices[v];
+            out.x=src->mVertices[v].x;out.y=src->mVertices[v].y;out.z=src->mVertices[v].z;
+            out.nx=src->HasNormals()?src->mNormals[v].x:0;
+            out.ny=src->HasNormals()?src->mNormals[v].y:1;
+            out.nz=src->HasNormals()?src->mNormals[v].z:0;
+            out.u=src->HasTextureCoords(0)?src->mTextureCoords[0][v].x:0;
+            out.v=src->HasTextureCoords(0)?src->mTextureCoords[0][v].y:0;
+        }
+        for(unsigned t=0;t<src->mNumFaces;t++) {
+            const aiFace& face=src->mFaces[t];
+            if(face.mNumIndices!=3)continue;
+            Triangle tri={face.mIndices[0],face.mIndices[1],face.mIndices[2],0};
+            mesh.triangles.push_back(tri);
+        }
+        if(upload(device,bus,mesh,entry,entry.path))any=true;
+    }
+    return any;
+}
+#endif
+
 inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
     bus.clear();bus.source=normalized(path);
     std::vector<MeshEntry> entries;std::string err;
     if(!readModelList(bus.source,entries,&err)){bus.report=err;return false;}
     for(size_t i=0;i<entries.size();i++){
         std::string name=lower(entries[i].path);
+        if(name.size()>=2 && name.substr(name.size()-2)==".x") {
+#ifdef BUS_HAS_ASSIMP
+            if(loadDirectXModel(device,bus,entries[i]))++bus.imported;
+            else {++bus.missing;if(bus.report.size()<1200)bus.report+="Failed .x "+entries[i].path+"\n";}
+#else
+            ++bus.missing;
+            if(bus.report.size()<1200)bus.report+=".x requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
+#endif
+            continue;
+        }
         if(name.size()<4||name.substr(name.size()-4)!=".o3d"){
             ++bus.missing;
-            if(bus.report.size()<1200)bus.report+="Unsupported .x or unknown mesh: "+entries[i].path+"\n";
+            if(bus.report.size()<1200)bus.report+="Unknown mesh type: "+entries[i].path+"\n";
             continue;
         }
         Mesh mesh;std::string reason;
