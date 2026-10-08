@@ -26,7 +26,7 @@ build_mingw32\bus_client.exe
 | `.bus` / `.ovh` | Lê `[model]` e localiza o `.cfg` |
 | `model.cfg` | Lê `[mesh]` em ordem, com caminho relativo |
 | `.o3d` | Leitura binaria nativa das versoes 1, 3, 4, 5 e 7 (geometria, UV, normais, triangulos, materiais e matriz de pivot) |
-| `.x` DirectX legado | Opcional com Assimp i686 (`BUS_WITH_ASSIMP=ON`) |
+| `.x` DirectX legado / `.3ds` 3D Studio | Opcional com Assimp i686 (`BUS_WITH_ASSIMP=ON`) |
 | `.bmp` `.png` `.jpg` | Textura via Windows Imaging Component |
 | `.tga` | 24/32-bit true-color, sem paleta, cru ou RLE |
 | `.dds` | DXT1, DXT3 e DXT5 (BC1/2/3), com DX10 BC1/2/3, somente mip 0 |
@@ -43,7 +43,7 @@ O parser reconhece `[newanim]`, `origin_trans`, `origin_rot_x/y/z`, `origin_from
 - Nao executa scripts OMSI `.osc`, plugin DLLs, HOF/IBIS, display dinamico, sons originais ou troca de pinturas `.cti`.
 - `[matl]` especifico, alpha/reflexao por variavel, transmap e efeitos avancados nao sao reproduzidos fielmente; importacao usa materiais estaticos `.o3d`.
 - `.o3d` protegidos ou com extensoes desconhecidas podem falhar; inspecte `omsi_import.log`.
-- Geometria `.x` so carrega quando Assimp esta ativo; `.o3d` nao precisa Assimp.
+- Geometria `.x` e `.3ds` so carregam quando Assimp esta ativo; `.o3d` nao precisa Assimp.
 - Algumas portas/rodas podem ficar sem animacao; toda geometria estaticamente importada segue o bus.
 - No multiplayer, cada cliente escolhe seu proprio modelo; servidor nao envia modelo/textura nem oferece sincronizacao OMSI completa.
 - Testes de parser sao sinteticos. A importacao real e o build MinGW32 em Windows 7/10 ainda precisam ser verificados com arquivos legais do usuario.
