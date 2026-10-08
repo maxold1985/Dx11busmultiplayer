@@ -18,6 +18,7 @@
 #include <d3d11.h>
 #include <stdio.h>
 #include <vector>
+#include <algorithm>
 #include <string>
 #include <math.h>
 #include <algorithm>
@@ -65,6 +66,7 @@ static sockaddr_in serverAddress={};
 static uint32_t myId=0,lastTick=0;
 static const int WIDTH=1280,HEIGHT=720;
 static XMMATRIX cameraMatrix;
+static XMVECTOR cameraEye=XMVectorZero();
 static float orbitYaw=0.0f,orbitPitch=0.38f,orbitDistance=16.0f;
 static bool orbitDragging=false;
 static POINT orbitLast={0,0};
@@ -253,40 +255,88 @@ static void drawAssimpBus(const BusState& b,const XMFLOAT4& tint) {
     }
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
 }
-static void drawOmsiBus(const BusState& b){
-    const float factor[]={0,0,0,0};
-    context->OMSetBlendState(omsiBlend,factor,0xFFFFFFFFu);
-    // OMSI exporta vertices em X-direita, Y-cima, Z-frente.
-    // O centro da dinamica do DX11Bus e 1.6 m acima do nivel das rodas.
-    XMMATRIX placement=XMMatrixRotationZ(b.roll)*
-        XMMatrixRotationX(b.pitch)*XMMatrixRotationY(b.heading)*
+struct GlassDraw {
+    size_t meshIndex;
+    size_t partIndex;
+    float distanceSquared;
+};
+
+static bool glassFartherFirst(const GlassDraw& a,const GlassDraw& b) {
+    return a.distanceSquared>b.distanceSquared;
+}
+
+static void drawOmsiBus(const BusState& b) {
+    const float blendFactor[4]={0,0,0,0};
+    const XMMATRIX placement=
+        XMMatrixRotationZ(b.roll)*
+        XMMatrixRotationX(b.pitch)*
+        XMMatrixRotationY(b.heading)*
         XMMatrixTranslation(b.x,b.y-1.6f,b.z);
-    // First render opaque body/interior into depth, then glass with
-    // depth test enabled but depth writes disabled.
-    for(int pass=0;pass<2;++pass) {
-        if(pass==1) {
-            context->OMSetDepthStencilState(glassDepthState,0);
-        }
-        for(size_t i=0;i<omsiBus.meshes.size();i++){
+
+    std::vector<GlassDraw> glass;
+    context->OMSetBlendState(0,blendFactor,0xFFFFFFFFu);
+    context->OMSetDepthStencilState(0,0);
+
+    // Opaque body and interior must populate the depth buffer first.
+    for(size_t i=0;i<omsiBus.meshes.size();++i) {
         const omsi::GpuMesh& mesh=omsiBus.meshes[i];
-        // The 3DS wheel transform is local to this mesh: rotate around its
-        // tire/axle pivot before applying the bus pose.
-        XMMATRIX world=omsi::wheelTransform(mesh,b)*
+        const XMMATRIX world=
+            omsi::wheelTransform(mesh,b)*
             omsi::animationTransform(mesh,b)*placement;
-        UINT stride=sizeof(MeshVertex),offset=0;
+        const UINT stride=sizeof(MeshVertex);
+        const UINT offset=0;
         context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
-        for(size_t j=0;j<mesh.parts.size();j++){
+
+        for(size_t j=0;j<mesh.parts.size();++j) {
             const omsi::DrawPart& part=mesh.parts[j];
-            if(part.transparent != (pass==1))continue;
-            setWorld(world,XMFLOAT4(part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]),part.texture);
+
+            if(part.transparent) {
+                const XMVECTOR center=XMVector3TransformCoord(
+                    XMVectorSet(part.center[0],part.center[1],part.center[2],1.0f),
+                    world
+                );
+                const XMVECTOR delta=XMVectorSubtract(center,cameraEye);
+                GlassDraw item;
+                item.meshIndex=i;
+                item.partIndex=j;
+                item.distanceSquared=XMVectorGetX(XMVector3LengthSq(delta));
+                glass.push_back(item);
+                continue;
+            }
+
+            setWorld(world,XMFLOAT4(
+                part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]
+            ),part.texture);
             context->IASetIndexBuffer(part.indices,DXGI_FORMAT_R32_UINT,0);
             context->DrawIndexed(part.count,0,0);
         }
     }
+
+    // Back-to-front blending: the glass does not occlude the seats/panel.
+    std::stable_sort(glass.begin(),glass.end(),glassFartherFirst);
+    context->OMSetBlendState(omsiBlend,blendFactor,0xFFFFFFFFu);
+    context->OMSetDepthStencilState(glassDepthState,0);
+
+    for(size_t k=0;k<glass.size();++k) {
+        const GlassDraw& item=glass[k];
+        const omsi::GpuMesh& mesh=omsiBus.meshes[item.meshIndex];
+        const omsi::DrawPart& part=mesh.parts[item.partIndex];
+        const XMMATRIX world=
+            omsi::wheelTransform(mesh,b)*
+            omsi::animationTransform(mesh,b)*placement;
+        const UINT stride=sizeof(MeshVertex);
+        const UINT offset=0;
+        context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
+        setWorld(world,XMFLOAT4(
+            part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]
+        ),part.texture);
+        context->IASetIndexBuffer(part.indices,DXGI_FORMAT_R32_UINT,0);
+        context->DrawIndexed(part.count,0,0);
     }
+
     context->OMSetDepthStencilState(0,0);
+    context->OMSetBlendState(0,blendFactor,0xFFFFFFFFu);
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
-    context->OMSetBlendState(0,0,0xFFFFFFFFu);
 }
 
 static void drawBus(const BusState& b,bool mine) {
@@ -546,6 +596,7 @@ static void drawFrame(){
                         focus.z-cosf(angle)*horizontal,1);
         at=XMVectorSet(focus.x,focus.y+0.45f,focus.z,1);
     }
+    cameraEye=eye;
     cameraMatrix=XMMatrixLookAtLH(eye,at,XMVectorSet(0,1,0,0))*
         XMMatrixPerspectiveFovLH(XM_PIDIV4,float(WIDTH)/HEIGHT,0.1f,800.0f);
     drawCity(focus);
