@@ -54,6 +54,9 @@ static ID3D11Buffer* constants=0;
 static ID3D11SamplerState* sampler=0;
 static ID3D11BlendState* omsiBlend=0;
 static ID3D11DepthStencilState* glassDepthState=0;
+static ID3D11RasterizerState* glassCullBack=0;
+static ID3D11RasterizerState* glassCullFront=0;
+static bool glassCullReversed=false;
 static ID3D11ShaderResourceView* roadTexture=0;
 static ID3D11ShaderResourceView* busTexture=0;
 static ModelAsset busModel;
@@ -194,6 +197,13 @@ static bool initializeGraphics(HWND hwnd) {
     glassDepth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
     glassDepth.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
     if(FAILED(device->CreateDepthStencilState(&glassDepth,&glassDepthState)))return false;
+    D3D11_RASTERIZER_DESC glassRaster={};
+    glassRaster.FillMode=D3D11_FILL_SOLID;
+    glassRaster.CullMode=D3D11_CULL_BACK;
+    glassRaster.DepthClipEnable=TRUE;
+    if(FAILED(device->CreateRasterizerState(&glassRaster,&glassCullBack)))return false;
+    glassRaster.CullMode=D3D11_CULL_FRONT;
+    if(FAILED(device->CreateRasterizerState(&glassRaster,&glassCullFront)))return false;
     roadTexture=makeChecker(85,85,85);
     busTexture=makeChecker(230,232,235);
     // Arquivos opcionais. Em GLB/FBX, Assimp deve estar habilitado no CMake.
@@ -210,7 +220,7 @@ static void shutdownGraphics(){
     if(context)context->ClearState();
     busModel.clear();
     omsiBus.clear();
-    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);releaseObj(omsiBlend);releaseObj(glassDepthState);
+    releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);releaseObj(omsiBlend);releaseObj(glassDepthState);releaseObj(glassCullBack);releaseObj(glassCullFront);
     releaseObj(constants);releaseObj(cubeVB);releaseObj(layout);
     releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);
     releaseObj(depthTexture);releaseObj(target);releaseObj(swapChain);
@@ -318,6 +328,7 @@ static void drawOmsiBus(const BusState& b) {
     std::stable_sort(glass.begin(),glass.end(),glassFartherFirst);
     context->OMSetBlendState(omsiBlend,blendFactor,0xFFFFFFFFu);
     context->OMSetDepthStencilState(glassDepthState,0);
+    context->RSSetState(glassCullReversed ? glassCullFront : glassCullBack);
 
     for(size_t k=0;k<glass.size();++k) {
         const GlassDraw& item=glass[k];
@@ -343,6 +354,7 @@ static void drawOmsiBus(const BusState& b) {
 
     context->OMSetDepthStencilState(0,0);
     context->OMSetBlendState(0,blendFactor,0xFFFFFFFFu);
+    context->RSSetState(0);
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
 }
 
@@ -1057,6 +1069,18 @@ static LRESULT CALLBACK windowProcedure(
 			if(w == 'L')importedBusAudio.trigger("rightDoor1Close");
 			if(w == 'N')importedBusAudio.trigger("reverse");
 		}
+
+		if(w == VK_F7 && firstKeyDown) {
+
+
+		    glassCullReversed = !glassCullReversed;
+
+
+		    return 0;
+
+
+		}
+
 
 		if(w == VK_F6 && firstKeyDown) {
 			glassDiagnostic = !glassDiagnostic;
