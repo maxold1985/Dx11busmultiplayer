@@ -355,11 +355,20 @@ public:
 				continue;
 			}
 
-			if(sound.volumeMultiplier < 0.001f) {
-				continue;
+			// This Marcopolo mod ships its first three interior motor layers
+			// muted (volumeMultiplier=0). Enable a conservative preview mix
+			// without changing the original Motor.txt on disk.
+			buscfg::SoundSpec activeSound = sound;
+			if(activeSound.volumeMultiplier < 0.001f) {
+				const int sectionNumber = atoi(sound.section.c_str() + 5);
+				if(sectionNumber >= 1 && sectionNumber <= 3) {
+					activeSound.volumeMultiplier = 0.45f;
+				} else {
+					continue;
+				}
 			}
 
-			const std::string file = scripts.locateSound(sound);
+			const std::string file = scripts.locateSound(activeSound);
 
 			if(file.empty()) {
 				++missing;
@@ -367,7 +376,7 @@ public:
 			}
 
 			Track track;
-			track.spec = sound;
+			track.spec = activeSound;
 
 			if(!loadClip(file, track.clip)) {
 				++failed;
