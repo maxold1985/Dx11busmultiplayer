@@ -352,7 +352,19 @@ public:
 			// Later [soundN] entries often represent doors, buttons, horns,
 			// and other events and must not loop continuously.
 			const int number = atoi(sound.section.c_str() + 5);
-			if(number < 1 || number > 18) {
+			if(number < 1 || number > 10) {
+				continue;
+			}
+			// Retarder, brake, differential, gear-shift and other event
+			// samples require event-driven playback; never loop them as RPM.
+			const std::string soundName=buscfg::lower(sound.file);
+			if(sound.retarder || sound.transmission ||
+				soundName.find("freio")!=std::string::npos ||
+				soundName.find("brake")!=std::string::npos ||
+				soundName.find("diferencial")!=std::string::npos ||
+				soundName.find("pegando")!=std::string::npos ||
+				soundName.find("partida")!=std::string::npos ||
+				soundName.find("retarder")!=std::string::npos) {
 				continue;
 			}
 
@@ -373,7 +385,7 @@ public:
 
 			if(file.empty()) {
 				++missing;
-				details += "MISSING [" + sound.section + "] " + sound.file + "\\n";
+				details += "MISSING [" + sound.section + "] " + sound.file + "\n";
 				continue;
 			}
 
