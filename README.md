@@ -13,7 +13,8 @@ Projeto C++11 de simulador de onibus multiplayer em DirectX 11, com servidor UDP
 - Cidade procedural ampliada para 4,08 km x 4,08 km, com ruas a cada 60 m, predios renderizados apenas perto do onibus e 28 paradas de passageiros.
 - Reset de posicao na origem (0, 0) pela tecla R ou botao, executado no servidor sem desconectar o jogador; indicador de coordenadas X/Z na janela.
 - Porta controlavel, embarque por aproximacao e parada, lotacao 40, indicadores de RPM, marcha, velocidade e rota.
-- Motor sintetico via WinMM, camera externa/interna, texturas por WIC.
+- Motor sintetico via WinMM como fallback e leitor de arquivos de som WAV/OGG Vorbis (Motor.txt [soundN]) com pitch e volume por RPM, camera externa/interna e texturas WIC.
+- Leitor dos arquivos INI de Cambio_A.txt e Cambio_M.txt: motor, 6 marchas, relacoes, diferencial, trocas por RPM, pausa de engate, mudanca Q/Z e retorno ao automatico G. Perfis aplicados no servidor via DX11BUS_MOD_CONFIG.
 - Importador opcional Assimp para GLB/FBX com texturas externas e embutidas.
 
 ## Compilar com WinLibs MinGW32 i686
@@ -30,7 +31,7 @@ Para importar modelos GLB/FBX instale Assimp compilado para i686 com ABI compati
 
 Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.exe. Na janela digite o IPv4 do servidor, como 127.0.0.1. Para outros computadores, use o IPv4 da rede local, liberando porta UDP 27015 no firewall. Pode executar bus_client.exe 192.168.1.10 para conectar diretamente.
 
-Detalhes: [suspensao e direcao](docs/SUSPENSION_STEERING.md), [mapa ampliado e reset de origem](docs/MAP_ORIGIN.md).
+Detalhes: [suspensao e direcao](docs/SUSPENSION_STEERING.md), [mapa ampliado e reset de origem](docs/MAP_ORIGIN.md) e [scripts INI, cambio e sons WAV/OGG](docs/SCRIPTS_AUDIO.md).
 
 Codigo C++11 tabulado, com convencoes de formatacao em [.clang-format](.clang-format).
 
@@ -47,11 +48,27 @@ Codigo C++11 tabulado, com convencoes de formatacao em [.clang-format](.clang-fo
 | R | Resetar onibus para origem (X=0, Z=0) |
 | Ç (ABNT2) | Alternar modo de direcao OMSI 2 aproximado / classico |
 | Botao Direcao OMSI: ON/OFF (Ç) | Alternativa a tecla Ç; exibe estado confirmado pelo servidor |
+| Botao Ler Scripts/Sons | Abre arquivo INI ou TXT do mod para leitura dos arquivos de audio. A transmissao e configurada no servidor. |
 | Botao Reset origem (R) | Alternativa ao teclado |
 | F1 | Camera interna / externa |
 | Botao direito do mouse + arrastar | Orbitar camera externa |
 | Roda do mouse | Zoom da camera externa |
 | Esc | Sair |
+
+## Configurar cambio e som de outro onibus
+
+O arquivo `scripts.zip` analisado e um pacote de configuracoes INI,
+**nao** e um script `.osc` original do OMSI 2. Extrair o ZIP em uma
+pasta local e configurar o arquivo principal `.ini` para o servidor:
+
+```bat
+set "DX11BUS_MOD_CONFIG=F:\\Mods\\GV6\\[SK8 Edits] Marcopolo Paradiso GV6 1150 MB O400RSD.ini"
+build_mingw32\\bus_server.exe
+```
+
+Use o mesmo caminho no cliente, ou clique em **Ler Scripts/Sons**.
+Sem a pasta de arquivos OGG/WAV originais, o audio continua sintetico.
+Consulte [docs/SCRIPTS_AUDIO.md](docs/SCRIPTS_AUDIO.md).
 
 ## Carregamento nativo de modelos OMSI 2 / openOMSI
 
