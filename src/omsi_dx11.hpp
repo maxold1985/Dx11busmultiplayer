@@ -1,6 +1,7 @@
 #pragma once
 // Adaptador OMSI -> Direct3D 11, sem Assimp. So modelos locais fornecidos pelo usuario.
 #include "omsi_format.hpp"
+#include "3ds_format.hpp"
 #include "simulation.hpp"
 #include "model_assimp.hpp"
 #ifdef BUS_HAS_ASSIMP
@@ -264,20 +265,46 @@ inline bool loadAssimpMesh(ID3D11Device* device,Bus& bus,const MeshEntry& entry)
 }
 #endif
 
+inline bool loadNative3DS(ID3D11Device* device,Bus& bus,const MeshEntry& entry){
+    std::vector<Mesh> meshes;
+    std::string error;
+    if(!read3DS(entry.path,meshes,&error)){
+        if(bus.report.size()<12000)bus.report+="Native 3DS error: "+entry.path+": "+error+"\n";
+        return false;
+    }
+    unsigned drawable=0;
+    size_t vertices=0,triangles=0;
+    for(size_t i=0;i<meshes.size();i++){
+        vertices+=meshes[i].vertices.size();
+        triangles+=meshes[i].triangles.size();
+        if(upload(device,bus,meshes[i],entry,entry.path))++drawable;
+    }
+    char stats[256];
+    sprintf(stats,"Native 3DS: %u/%u meshes on GPU, %u vertices, %u triangles\n",
+            drawable,(unsigned)meshes.size(),(unsigned)vertices,(unsigned)triangles);
+    if(bus.report.size()<12000)bus.report+=stats;
+    if(drawable==0 && bus.report.size()<12000)
+        bus.report+="Native 3DS parsed but no meshes uploaded; inspect Direct3D resources.\n";
+    return drawable>0;
+}
 inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
     bus.clear();bus.source=normalized(path);
     std::vector<MeshEntry> entries;std::string err;
     if(!readModelList(bus.source,entries,&err)){bus.report=err;return false;}
     for(size_t i=0;i<entries.size();i++){
         std::string name=lower(entries[i].path);
-        if((name.size()>=2 && name.substr(name.size()-2)==".x") ||
-           (name.size()>=4 && name.substr(name.size()-4)==".3ds")) {
+        if(name.size()>=4 && name.substr(name.size()-4)==".3ds"){
+            if(loadNative3DS(device,bus,entries[i]))++bus.imported;
+            else ++bus.missing;
+            continue;
+        }
+        if(name.size()>=2 && name.substr(name.size()-2)==".x") {
 #ifdef BUS_HAS_ASSIMP
             if(loadAssimpMesh(device,bus,entries[i]))++bus.imported;
             else {++bus.missing;if(bus.report.size()<12000)bus.report+="Failed Assimp mesh "+entries[i].path+"\n";}
 #else
             ++bus.missing;
-            if(bus.report.size()<1200)bus.report+=".x/.3ds requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
+            if(bus.report.size()<1200)bus.report+=".x requires BUS_WITH_ASSIMP=ON: "+entries[i].path+"\n";
 #endif
             continue;
         }
