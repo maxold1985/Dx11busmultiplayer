@@ -65,10 +65,11 @@ static const int STOP_COUNT=6;
 struct Dynamics {
     BusState b;
     float verticalSpeed,pitchSpeed,rollSpeed,throttle,steering,brake,boardingSeconds;
+    float wheelTravel[6];
     int boardedAtStop;
     uint32_t lastFlags;
     Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),lastFlags(0) {
-        memset(&b,0,sizeof(b));b.y=1.6f;b.gear=1;b.rpm=700;
+        memset(&b,0,sizeof(b));b.y=1.6f;b.gear=1;b.rpm=700;for(int i=0;i<6;i++)wheelTravel[i]=0;
     }
 };
 inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
@@ -82,6 +83,13 @@ inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
     if(pressed&INPUT_GEAR_UP) d.b.gear=std::min(6,d.b.gear+1);
     if(pressed&INPUT_GEAR_DOWN) d.b.gear=std::max(1,d.b.gear-1);
     d.lastFlags=flags;
+}
+inline float visualTravel(const BusState& b,int i) {
+    const float lx=wheelOffsetX(i),lz=wheelOffsetZ(i);
+    const float wx=b.x+std::cos(b.heading)*lx+std::sin(b.heading)*lz;
+    const float wz=b.z-std::sin(b.heading)*lx+std::cos(b.heading)*lz;
+    const float origin=b.y-0.4f+b.pitch*lz+b.roll*lx;
+    return clamp(SPRING_REST-(origin-terrain(wx,wz)-WHEEL_RADIUS),0,SPRING_REST);
 }
 inline void suspension(Dynamics& d,float dt) {
     float force=-10000.0f*9.81f;
@@ -99,7 +107,7 @@ inline void suspension(Dynamics& d,float dt) {
             const float contactVelocity=d.verticalSpeed+d.pitchSpeed*lz+d.rollSpeed*lx;
             spring=std::max(0.0f,compression*90000.0f-contactVelocity*9500.0f);
         }
-        d.b.wheelTravel[i]=compression;
+        d.wheelTravel[i]=compression;
         force+=spring;
         pitchTorque-=spring*lz;
         rollTorque+=spring*lx;
