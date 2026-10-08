@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -682,9 +683,9 @@ struct ModScripts {
 
 		std::ostringstream report;
 		report << "Configuracao: " << entryPath
-			<< "\\nManual: " << (hasManual ? "sim" : "nao")
-			<< "\\nAutomatico: " << (hasAutomatic ? "sim" : "nao")
-			<< "\\nSons numerados: " << sounds.size();
+			<< "\nManual: " << (hasManual ? "sim" : "nao")
+			<< "\nAutomatico: " << (hasAutomatic ? "sim" : "nao")
+			<< "\nSons numerados: " << sounds.size();
 
 		diagnostic = report.str();
 		return true;
