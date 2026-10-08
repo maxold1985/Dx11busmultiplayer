@@ -516,7 +516,7 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
          140,14,180,27,windowHandle,(HMENU)101,instance,0);
     connectButton=CreateWindowA("BUTTON","Conectar",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
          335,14,110,27,windowHandle,(HMENU)102,instance,0);
-    omsiButton=CreateWindowA("BUTTON","Carregar OMSI (.bus)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+    omsiButton=CreateWindowA("BUTTON","Carregar OMSI (.bus/.3ds)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
          460,14,195,27,windowHandle,(HMENU)103,instance,0);
     ShowWindow(windowHandle,show);
     if(!initializeGraphics(windowHandle)){
