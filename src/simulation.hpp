@@ -394,6 +394,7 @@ inline void input(
 	uint32_t flags
 ) {
 	d.throttle = clamp(throttle, -1.0f, 1.0f);
+	d.b.clutch = (flags & INPUT_CLUTCH) != 0 ? 1.0f : 0.0f;
 	d.steering = clamp(steering, -1.0f, 1.0f);
 	d.brake = clamp(brake, 0.0f, 1.0f);
 
@@ -426,7 +427,7 @@ inline void input(
 		}
 	}
 
-	if((pressed & INPUT_GEAR_UP) != 0) {
+	if((pressed & INPUT_GEAR_UP) != 0 && (d.b.clutch > 0.5f || !d.driveManual.valid)) {
 		d.manualGear = true;
 		d.b.transmissionMode = TRANSMISSION_MANUAL;
 		const buscfg::DriveProfile* profile = activeDrive(d);
@@ -439,7 +440,7 @@ inline void input(
 		}
 	}
 
-	if((pressed & INPUT_GEAR_DOWN) != 0) {
+	if((pressed & INPUT_GEAR_DOWN) != 0 && (d.b.clutch > 0.5f || !d.driveManual.valid)) {
 		d.manualGear = true;
 		d.b.transmissionMode = TRANSMISSION_MANUAL;
 		const buscfg::DriveProfile* profile = activeDrive(d);
@@ -541,7 +542,7 @@ inline void step(Dynamics& d,float dt) {
 		const float freeRevTarget =
 			drive->idleRpm + std::fabs(d.throttle) * 380.0f;
 		const float requestedRpm = clamp(
-			std::max(freeRevTarget, rpmFromWheels),
+			std::max(freeRevTarget, d.manualGear && b.clutch > 0.5f ? 0.0f : rpmFromWheels),
 			drive->idleRpm,
 			drive->maxRpm
 		);
@@ -562,10 +563,17 @@ inline void step(Dynamics& d,float dt) {
 
 		motor = d.throttle * driveAcceleration * traction;
 
+		if(d.manualGear) {
+			motor *= 1.0f - b.clutch;
+		}
+
 		if(d.shiftTimer > 0.0f) {
 			d.shiftTimer = std::max(0.0f, d.shiftTimer - frameDt);
 			motor *= 0.15f;
 		}
+	}
+    if(drive == 0 && d.manualGear) {
+		motor *= 1.0f - b.clutch;
 	}
     const float speedAbs=std::fabs(b.speed);
     const float drag=0.0065f*b.speed*speedAbs;
