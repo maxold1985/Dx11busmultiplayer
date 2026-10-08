@@ -72,10 +72,32 @@ if(BUS_WITH_ASSIMP)
         set(BUS_ASSIMP_TARGET bus_assimp_imported)
     endif()
 endif()
-find_program(FXC_EXECUTABLE NAMES fxc fxc.exe)
-if(NOT FXC_EXECUTABLE)
-    message(FATAL_ERROR "fxc.exe not found: set FXC_EXECUTABLE")
+# FXC is shipped with the Windows SDK, not necessarily on PATH.
+# MSVC 2022 may use either x64 or Win32 targets.
+set(FXC_EXECUTABLE "" CACHE FILEPATH "Path to the Windows SDK fxc.exe")
+if(NOT FXC_EXECUTABLE OR NOT EXISTS "${FXC_EXECUTABLE}")
+    find_program(BUS_FXC_ON_PATH NAMES fxc.exe fxc)
+    if(BUS_FXC_ON_PATH)
+        set(FXC_EXECUTABLE "${BUS_FXC_ON_PATH}" CACHE FILEPATH "Path to fxc.exe" FORCE)
+    endif()
 endif()
+if(NOT FXC_EXECUTABLE OR NOT EXISTS "${FXC_EXECUTABLE}")
+    file(GLOB BUS_SDK_FXC
+        "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/fxc.exe"
+        "C:/Program Files (x86)/Windows Kits/10/bin/*/x86/fxc.exe"
+        "C:/Program Files (x86)/Windows Kits/8.1/bin/x86/fxc.exe"
+        "C:/Program Files (x86)/Windows Kits/8.1/bin/x64/fxc.exe")
+    if(BUS_SDK_FXC)
+        list(SORT BUS_SDK_FXC)
+        list(REVERSE BUS_SDK_FXC)
+        list(GET BUS_SDK_FXC 0 BUS_FXC_SELECTED)
+        set(FXC_EXECUTABLE "${BUS_FXC_SELECTED}" CACHE FILEPATH "Path to fxc.exe" FORCE)
+    endif()
+endif()
+if(NOT FXC_EXECUTABLE OR NOT EXISTS "${FXC_EXECUTABLE}")
+    message(FATAL_ERROR "fxc.exe not found. Install Windows 10 SDK (Desktop C++ tools) or pass -DFXC_EXECUTABLE=C:/path/to/fxc.exe")
+endif()
+message(STATUS "HLSL compiler: ${FXC_EXECUTABLE}")
 set(VS_CSO "${CMAKE_CURRENT_BINARY_DIR}/bus_vs.cso")
 set(PS_CSO "${CMAKE_CURRENT_BINARY_DIR}/bus_ps.cso")
 add_custom_command(OUTPUT "${VS_CSO}"
