@@ -294,6 +294,8 @@ inline void setDriveProfiles(
 	d.driveAutomatic = automatic;
 	d.driveManual = manual;
 	d.manualGear = !automatic.valid && manual.valid;
+	d.b.transmissionMode = d.manualGear ?
+		TRANSMISSION_MANUAL : TRANSMISSION_AUTOMATIC;
 	d.b.gear = 1;
 	d.shiftTimer = 0.0f;
 
@@ -375,6 +377,8 @@ inline void resetOrigin(Dynamics& dynamics) {
 	dynamics = Dynamics();
 	setDriveProfiles(dynamics, savedAuto, savedManual);
 	dynamics.manualGear = savedManualMode;
+	dynamics.b.transmissionMode = savedManualMode ?
+		TRANSMISSION_MANUAL : TRANSMISSION_AUTOMATIC;
 	dynamics.b.id = savedId;
 	dynamics.b.steeringMode = savedSteeringMode;
 	dynamics.b.x = 0.0f;
@@ -418,11 +422,13 @@ inline void input(
 	if((pressed & INPUT_AUTO_GEAR) != 0) {
 		if(d.driveAutomatic.valid || !d.driveManual.valid) {
 			d.manualGear = false;
+			d.b.transmissionMode = TRANSMISSION_AUTOMATIC;
 		}
 	}
 
 	if((pressed & INPUT_GEAR_UP) != 0) {
 		d.manualGear = true;
+		d.b.transmissionMode = TRANSMISSION_MANUAL;
 		const buscfg::DriveProfile* profile = activeDrive(d);
 		const int maximum = profile != 0 ? profile->gears : 6;
 		const int next = std::min(maximum, d.b.gear + 1);
@@ -435,6 +441,7 @@ inline void input(
 
 	if((pressed & INPUT_GEAR_DOWN) != 0) {
 		d.manualGear = true;
+		d.b.transmissionMode = TRANSMISSION_MANUAL;
 		const buscfg::DriveProfile* profile = activeDrive(d);
 		const int next = std::max(1, d.b.gear - 1);
 
