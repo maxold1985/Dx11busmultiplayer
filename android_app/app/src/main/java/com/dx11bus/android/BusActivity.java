@@ -47,6 +47,7 @@ public final class BusActivity extends Activity {
     public static native void nativeResize(int width, int height);
     public static native void nativeDraw();
     public static native boolean nativeConnect(String ipv4);
+    public static native void nativeDisconnect();
     public static native boolean nativeLoadModel(String file);
     public static native boolean nativeLoadScript(String file);
     public static native void nativeControls(float throttle, float steer, float brake, float clutch);
@@ -63,6 +64,7 @@ public final class BusActivity extends Activity {
     private TextView status;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean forward, reverse, left, right, brake, clutch;
+    private float padThrottle, padSteering, padBrake;
     private float touchX, touchY, pinchDistance;
     private boolean dragging;
     private final Runnable statusTicker=new Runnable() {
@@ -164,6 +166,7 @@ public final class BusActivity extends Activity {
         addAction(actions,"MODELOS MOD",() -> chooseFromImportedFolder(false));
         addAction(actions,"SCRIPTS MOD",() -> chooseFromImportedFolder(true));
         addAction(actions,"CONECTAR",this::askServer);
+        addAction(actions,"DESCONECTAR",() -> surface.queueEvent(BusActivity::nativeDisconnect));
         addAction(actions,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
         addAction(actions,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
         addAction(actions,"ZOOM -",() -> surface.queueEvent(() -> nativeZoom(2.0f)));
@@ -250,10 +253,15 @@ public final class BusActivity extends Activity {
             case 5:brake=held;break;
             case 6:clutch=held;break;
         }
+        sendControls();
+    }
+    private void sendControls() {
         float t=(forward?1:0)-(reverse?1:0);
         float s=(right?1:0)-(left?1:0);
-        float b=brake?1:0;
-        float c=clutch?1:0;
+        if(t==0)t=padThrottle;
+        if(s==0)s=padSteering;
+        float b=Math.max(brake?1.0f:0.0f,padBrake);
+        float c=clutch?1.0f:0.0f;
         surface.queueEvent(() -> nativeControls(t,s,b,c));
     }
     private void openFile(int request) {
@@ -286,6 +294,23 @@ public final class BusActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this,message,Toast.LENGTH_SHORT).show();
     }
+    private static float gamepadDeadzone(float x) {
+        return Math.abs(x)<0.12f?0.0f:Math.max(-1.0f,Math.min(1.0f,x));
+    }
+    @Override public boolean onGenericMotionEvent(MotionEvent event) {
+        if((event.getSource() & InputDevice.SOURCE_JOYSTICK)==
+            InputDevice.SOURCE_JOYSTICK &&
+            event.getAction()==MotionEvent.ACTION_MOVE) {
+            padThrottle=gamepadDeadzone(-event.getAxisValue(MotionEvent.AXIS_Y));
+            padSteering=gamepadDeadzone(event.getAxisValue(MotionEvent.AXIS_X));
+            padBrake=Math.max(0.0f,Math.min(1.0f,Math.max(
+                event.getAxisValue(MotionEvent.AXIS_LTRIGGER),
+                event.getAxisValue(MotionEvent.AXIS_BRAKE))));
+            sendControls();
+            return true;
+        }
+        return super.onGenericMotionEvent(event);
+    }
     @Override public boolean onKeyDown(int keyCode,KeyEvent event) {
         switch(keyCode) {
             case KeyEvent.KEYCODE_W: setKey(1,true);return true;
@@ -313,6 +338,14 @@ public final class BusActivity extends Activity {
             case KeyEvent.KEYCODE_R:
                 if(event.getRepeatCount()==0)
                     surface.queueEvent(() -> nativeFlag(16));
+                return true;
+            case KeyEvent.KEYCODE_BUTTON_A:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(1));
+                return true;
+            case KeyEvent.KEYCODE_BUTTON_R1:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(() -> nativeFlag(2));
                 return true;
             case KeyEvent.KEYCODE_H:
                 if(event.getRepeatCount()==0)
@@ -348,6 +381,7 @@ public final class BusActivity extends Activity {
     @Override protected void onPause() {
         handler.removeCallbacks(statusTicker);
         forward=reverse=left=right=brake=clutch=false;
+        padThrottle=padSteering=padBrake=0.0f;
         handler.removeCallbacks(frameTicker);
         surface.queueEvent(() -> {
             nativeControls(0,0,0,0);
