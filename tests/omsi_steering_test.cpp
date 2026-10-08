@@ -121,8 +121,8 @@ static void testLowSpeedTurn() {
 
 	assert(omsi.b.steeringMode == STEERING_OMSI_APPROX);
 	assert(omsi.b.heading > classic.b.heading + 0.03f);
-	assert(isfinite(omsi.b.roll));
-	assert(isfinite(omsi.b.pitch));
+	assert(std::isfinite(omsi.b.roll));
+	assert(std::isfinite(omsi.b.pitch));
 
 	printf(
 		"Two-second turn: classic %.3f rad, OMSI approx %.3f rad\n",
