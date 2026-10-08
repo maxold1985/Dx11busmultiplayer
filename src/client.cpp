@@ -238,7 +238,10 @@ static void drawOmsiBus(const BusState& b){
         XMMatrixTranslation(b.x,b.y-1.6f,b.z);
     for(size_t i=0;i<omsiBus.meshes.size();i++){
         const omsi::GpuMesh& mesh=omsiBus.meshes[i];
-        XMMATRIX world=omsi::animationTransform(mesh,b)*placement;
+        // The 3DS wheel transform is local to this mesh: rotate around its
+        // tire/axle pivot before applying the bus pose.
+        XMMATRIX world=omsi::wheelTransform(mesh,b)*
+            omsi::animationTransform(mesh,b)*placement;
         UINT stride=sizeof(MeshVertex),offset=0;
         context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
         for(size_t j=0;j<mesh.parts.size();j++){
