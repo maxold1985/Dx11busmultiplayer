@@ -9,6 +9,7 @@ Projeto C++11 de simulador de onibus multiplayer em DirectX 11, com servidor UDP
 - Suspensao raycast 6 rodas: molas/amortecedores calibrados para 12 t, distribuicao de carga 43/24/33% entre eixos, barra estabilizadora e curso visual no 3DS. Tracao/freios e aderencia consideram a carga de contato das rodas.
 - Colisao OBB/SAT entre onibus e com edificios da cidade procedural.
 - Direcao com Ackermann, esterco progressivo, assistencia em velocidade e resposta de guinada limitada pela aderencia lateral.
+- Modo de direcao OMSI 2 aproximado (tecla **Ç** no teclado ABNT2 ou botao na janela), alternavel por jogador, com mais esterco em baixa velocidade, retorno progressivo do volante e resposta de curvas recalibrada; servidor autoritativo.
 - Cidade procedural ampliada para 4,08 km x 4,08 km, com ruas a cada 60 m, predios renderizados apenas perto do onibus e 28 paradas de passageiros.
 - Reset de posicao na origem (0, 0) pela tecla R ou botao, executado no servidor sem desconectar o jogador; indicador de coordenadas X/Z na janela.
 - Porta controlavel, embarque por aproximacao e parada, lotacao 40, indicadores de RPM, marcha, velocidade e rota.
@@ -44,6 +45,8 @@ Codigo C++11 tabulado, com convencoes de formatacao em [.clang-format](.clang-fo
 | Q / Z | Marcha manual acima / abaixo |
 | G | Retomar cambio automatico |
 | R | Resetar onibus para origem (X=0, Z=0) |
+| Ç (ABNT2) | Alternar modo de direcao OMSI 2 aproximado / classico |
+| Botao Direcao OMSI: ON/OFF (Ç) | Alternativa a tecla Ç; exibe estado confirmado pelo servidor |
 | Botao Reset origem (R) | Alternativa ao teclado |
 | F1 | Camera interna / externa |
 | Botao direito do mouse + arrastar | Orbitar camera externa |
