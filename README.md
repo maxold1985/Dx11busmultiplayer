@@ -42,7 +42,7 @@ Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.e
 
 ## Carregamento nativo de modelos OMSI 2 / openOMSI
 
-O cliente DX11 aceita modelos proprios de OMSI 2 por meio de `.bus` -> `model.cfg` -> `.o3d` (sem Assimp). Abra `bus_client.exe` e use o botao **Carregar OMSI (.bus)**; escolha o .bus dentro da instalacao OMSI 2. Tambem aceita diretamente `.cfg` ou `.o3d`. Texturas `.bmp`, `.png`, `.jpg`, `.tga` e `.dds` (BC1/2/3) sao carregadas do diretorio do onibus. `.x` requer Assimp opcional. O arquivo `omsi_import.log` lista malhas nao carregadas.
+O cliente DX11 aceita modelos proprios de OMSI 2 por meio de `.bus` -> `model.cfg` -> `.o3d` (sem Assimp). Abra `bus_client.exe` e use o botao **Carregar OMSI (.bus)**; escolha o .bus dentro da instalacao OMSI 2. Tambem aceita diretamente `.cfg` ou `.o3d`. Texturas `.bmp`, `.png`, `.jpg`, `.tga` e `.dds` (BC1/2/3) sao carregadas do diretorio do onibus. `.x` e `.3ds` requerem Assimp i686 opcional (`BUS_WITH_ASSIMP=ON`). O arquivo `omsi_import.log` lista malhas nao carregadas.
 
 O mesmo modelo carregado neste cliente representa todos os onibus visiveis por ele. Animacoes de rodas, suspensao e portas estao mapeadas parcialmente; scripts, sistema HOF/IBIS, CTI e logica completa de OMSI ainda nao sao executados. Detalhes em [docs/OMSI_COMPAT.md](docs/OMSI_COMPAT.md). Nenhum conteudo original de OMSI acompanha este projeto.
 
