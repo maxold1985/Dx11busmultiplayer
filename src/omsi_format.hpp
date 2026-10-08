@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include <fstream>
 #include <iterator>
