@@ -9,6 +9,10 @@ namespace sim {
 static const float PI = 3.14159265358979323846f;
 static const float BUS_HALF_WIDTH=1.18f, BUS_HALF_LENGTH=3.78f;
 static const float WHEEL_RADIUS=0.48f, SPRING_REST=0.88f;
+static const float BUS_MASS=12000.0f, GRAVITY=9.81f;
+static const float SUSPENSION_SAG=0.20f; // Compression at rest on level ground.
+static const float STEER_WHEELBASE=5.0f, STEER_TRACK=2.08f;
+static const float MAX_LATERAL_ACCEL=3.25f; // Passenger-bus tire grip / comfort.
 struct Box { float x,z,hx,hz; };
 
 inline float clamp(float x,float mn,float mx) {return std::max(mn,std::min(mx,x));}
@@ -62,15 +66,84 @@ inline Stop stop(int i) {
     Stop s={p[i%6][0],p[i%6][1],8};return s;
 }
 static const int STOP_COUNT=6;
+// One raycast per wheel, along world -Y, against the heightfield road.
+struct RayHit {
+    bool hit;
+    float distance, height, nx, ny, nz;
+    RayHit():hit(false),distance(0),height(0),nx(0),ny(1),nz(0){}
+};
+inline RayHit raycastGround(float x,float originY,float z,float maxLength) {
+    RayHit r;
+    r.height=terrain(x,z);
+    r.distance=originY-r.height;
+    r.hit=(r.distance<=maxLength); // If chassis penetrates road, preserve contact.
+    if(!r.hit)return r;
+    const float e=0.10f;
+    const float dx=(terrain(x+e,z)-terrain(x-e,z))/(2.0f*e);
+    const float dz=(terrain(x,z+e)-terrain(x,z-e))/(2.0f*e);
+    const float inv=1.0f/std::sqrt(1.0f+dx*dx+dz*dz);
+    r.nx=-dx*inv;r.ny=inv;r.nz=-dz*inv;
+    return r;
+}
+inline float steerLimit(float signedSpeed) {
+    const float v=std::fabs(signedSpeed);
+    return 0.53f/(1.0f+0.0035f*v*v);
+}
+inline float wheelSteerAngle(const BusState& b,int wheel) {
+    if(wheel<0||wheel>=2)return 0.0f;
+    const float base=clamp(b.steer,-1.0f,1.0f)*steerLimit(b.speed);
+    if(std::fabs(base)<0.00001f)return 0.0f;
+    const float radius=STEER_WHEELBASE/std::tan(std::fabs(base));
+    const float side=base>0?1.0f:-1.0f;
+    const float atRadius=std::max(0.5f,radius-side*wheelOffsetX(wheel));
+    return side*std::atan(STEER_WHEELBASE/atRadius);
+}
+inline float sprungWeight(int wheel) {
+    // Front axle 43%, middle 24%, rearmost 33%; their weighted lever arms
+    // sum to (approximately) zero about the modeled center of gravity.
+    return wheel<2?0.215f:(wheel<4?0.120f:0.165f);
+}
+inline float springStiffness(int wheel) {
+    return BUS_MASS*GRAVITY*sprungWeight(wheel)/SUSPENSION_SAG;
+}
+inline float springDamping(int wheel) {
+    // Near 45% critical damping for each wheel's sprung mass.
+    return 0.90f*std::sqrt(springStiffness(wheel)*BUS_MASS*sprungWeight(wheel));
+}
+inline float wheelMountHeight(const BusState& b,int i) {
+    // Must match row-vector DirectX rotations: +pitch lowers front,
+    // +roll lifts right side.
+    return b.y-0.40f-b.pitch*wheelOffsetZ(i)+b.roll*wheelOffsetX(i);
+}
+inline RayHit wheelRay(const BusState& b,int i) {
+    const float lx=wheelOffsetX(i),lz=wheelOffsetZ(i);
+    const float c=std::cos(b.heading),s=std::sin(b.heading);
+    return raycastGround(b.x+c*lx+s*lz,wheelMountHeight(b,i),
+                         b.z-s*lx+c*lz,SPRING_REST+WHEEL_RADIUS);
+}
+inline float wheelCompression(const RayHit& ray){
+    return ray.hit?clamp(SPRING_REST+WHEEL_RADIUS-ray.distance,0.0f,SPRING_REST):0.0f;
+}
 struct Dynamics {
     BusState b;
-    float verticalSpeed,pitchSpeed,rollSpeed,throttle,steering,brake,boardingSeconds;
-    float wheelTravel[6];
+    float verticalSpeed,pitchSpeed,rollSpeed,yawRate,lateralSpeed;
+    float throttle,steering,brake,boardingSeconds;
+    float wheelTravel[6],wheelForce[6];
+    bool wheelContact[6];
     int boardedAtStop;
     uint32_t lastFlags;
     bool manualGear;
-    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),lastFlags(0),manualGear(false) {
-        memset(&b,0,sizeof(b));b.y=1.6f;b.gear=1;b.rpm=700;for(int i=0;i<6;i++)wheelTravel[i]=0;
+    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),yawRate(0),lateralSpeed(0),
+        throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),
+        lastFlags(0),manualGear(false) {
+        memset(&b,0,sizeof(b));
+        b.y=0.40f+WHEEL_RADIUS+SPRING_REST-SUSPENSION_SAG;
+        b.gear=1;b.rpm=700;
+        for(int i=0;i<6;i++){
+            wheelTravel[i]=SUSPENSION_SAG;
+            wheelForce[i]=BUS_MASS*GRAVITY*sprungWeight(i);
+            wheelContact[i]=true;
+        }
     }
 };
 inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
@@ -87,66 +160,115 @@ inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
     d.lastFlags=flags;
 }
 inline float visualTravel(const BusState& b,int i) {
-    const float lx=wheelOffsetX(i),lz=wheelOffsetZ(i);
-    const float wx=b.x+std::cos(b.heading)*lx+std::sin(b.heading)*lz;
-    const float wz=b.z-std::sin(b.heading)*lx+std::cos(b.heading)*lz;
-    const float origin=b.y-0.4f+b.pitch*lz+b.roll*lx;
-    return clamp(SPRING_REST-(origin-terrain(wx,wz)-WHEEL_RADIUS),0,SPRING_REST);
+    if(i<0||i>=6)return 0.0f;
+    return wheelCompression(wheelRay(b,i));
 }
-inline void suspension(Dynamics& d,float dt) {
-    float force=-10000.0f*9.81f;
-    // Chassi nivelado em piso plano: rigidez e amortecimento equilibrados por eixo.
-    float pitchTorque=0,rollTorque=0;
-    for(int i=0;i<6;i++) {
-        float lx=wheelOffsetX(i),lz=wheelOffsetZ(i);
-        const float wx=d.b.x+std::cos(d.b.heading)*lx+std::sin(d.b.heading)*lz;
-        const float wz=d.b.z-std::sin(d.b.heading)*lx+std::cos(d.b.heading)*lz;
-        const float origin=d.b.y-0.4f+d.b.pitch*lz+d.b.roll*lx;
-        // Raio vertical para terreno: primeiro contato com a roda.
-        const float distance=origin-terrain(wx,wz)-WHEEL_RADIUS;
-        const float compression=clamp(SPRING_REST-distance,0,SPRING_REST);
-        float spring=0;
-        if(compression>0.0f && distance<SPRING_REST) {
-            const float contactVelocity=d.verticalSpeed+d.pitchSpeed*lz+d.rollSpeed*lx;
-            spring=std::max(0.0f,compression*90000.0f-contactVelocity*9500.0f);
+inline void suspension(Dynamics& d,float dt,float forwardAcceleration=0) {
+    float normal[6],compression[6],spring[6]={0,0,0,0,0,0};
+    float force=-BUS_MASS*GRAVITY,pitchTorque=0,rollTorque=0;
+    // Gather all ray hits before computing anti-roll coupling.
+    for(int i=0;i<6;i++){
+        const RayHit hit=wheelRay(d.b,i);
+        d.wheelContact[i]=hit.hit;
+        compression[i]=wheelCompression(hit);
+        d.wheelTravel[i]=compression[i];
+        normal[i]=hit.ny;
+        if(!hit.hit || compression[i]<=0.0f)continue;
+        const float pointVelocity=d.verticalSpeed-
+            d.pitchSpeed*wheelOffsetZ(i)+d.rollSpeed*wheelOffsetX(i);
+        float f=springStiffness(i)*compression[i]-
+            springDamping(i)*pointVelocity;
+        // Progressive bump stop prevents suspension bottoming at full travel.
+        if(compression[i]>SPRING_REST-0.12f){
+            const float bottom=compression[i]-(SPRING_REST-0.12f);
+            f+=350000.0f*bottom*bottom;
         }
-        d.wheelTravel[i]=compression;
-        force+=spring;
-        pitchTorque+=spring*lz;
-        rollTorque-=spring*lx;
+        spring[i]=clamp(f,0.0f,180000.0f);
     }
-    d.verticalSpeed=clamp(d.verticalSpeed+force/10000.0f*dt,-15,15);
+    for(int axle=0;axle<3;axle++){
+        const int left=axle*2,right=left+1;
+        if(!d.wheelContact[left] || !d.wheelContact[right])continue;
+        const float antiRoll=27000.0f*(compression[left]-compression[right]);
+        spring[left]=std::max(0.0f,spring[left]+antiRoll);
+        spring[right]=std::max(0.0f,spring[right]-antiRoll);
+    }
+    for(int i=0;i<6;i++){
+        d.wheelForce[i]=spring[i];
+        force+=spring[i]*normal[i];
+        pitchTorque-=spring[i]*wheelOffsetZ(i);
+        rollTorque+=spring[i]*wheelOffsetX(i);
+    }
+    // Body inertia under acceleration and cornering, not arbitrary tilt.
+    pitchTorque-=BUS_MASS*forwardAcceleration*0.76f;
+    rollTorque+=BUS_MASS*d.b.speed*d.yawRate*0.96f;
+    pitchTorque-=d.b.pitch*42000.0f+d.pitchSpeed*31000.0f;
+    rollTorque-=d.b.roll*42000.0f+d.rollSpeed*26000.0f;
+    d.verticalSpeed=clamp(d.verticalSpeed+(force/BUS_MASS)*dt,-7.0f,7.0f);
     d.b.y+=d.verticalSpeed*dt;
-    d.pitchSpeed+=(pitchTorque/240000.0f-d.b.pitch*12.0f-d.pitchSpeed*8.0f)*dt;
-    d.rollSpeed+=(rollTorque/130000.0f-d.b.roll*14.0f-d.rollSpeed*9.0f)*dt;
-    d.b.pitch=clamp(d.b.pitch+d.pitchSpeed*dt,-0.20f,0.20f);
-    d.b.roll=clamp(d.b.roll+d.rollSpeed*dt,-0.20f,0.20f);
-    if(d.b.y<0.85f) {d.b.y=0.85f;d.verticalSpeed=std::max(0.0f,d.verticalSpeed);}
+    d.pitchSpeed=clamp(d.pitchSpeed+pitchTorque/95000.0f*dt,-0.70f,0.70f);
+    d.rollSpeed=clamp(d.rollSpeed+rollTorque/42000.0f*dt,-0.70f,0.70f);
+    d.b.pitch=clamp(d.b.pitch+d.pitchSpeed*dt,-0.16f,0.16f);
+    d.b.roll=clamp(d.b.roll+d.rollSpeed*dt,-0.16f,0.16f);
+    // Safety floor only; raycast spring/damper normally supports the bus.
+    const float minHeight=terrain(d.b.x,d.b.z)+0.84f;
+    if(d.b.y<minHeight){
+        d.b.y=minHeight;
+        d.verticalSpeed=std::max(d.verticalSpeed,0.0f);
+    }
 }
 inline void step(Dynamics& d,float dt) {
+    if(dt<=0.0f)return;
+    // Prevent explosive integration if the host experiences a frame stall.
+    const float frameDt=clamp(dt,0.0f,1.0f/30.0f);
     BusState& b=d.b;
-    b.steer+=(d.steering-b.steer)*clamp(dt*5.0f,0,1);
+    b.steer+=(d.steering-b.steer)*clamp(frameDt*3.8f,0.0f,1.0f);
+    b.steer=clamp(b.steer,-1.0f,1.0f);
+    const float oldSpeed=b.speed;
     const float traction=(b.door>0.5f)?0.0f:1.0f;
-    const float acceleration=(d.throttle>=0?3.4f:2.0f);
-    b.speed+=d.throttle*acceleration*traction*dt;
-    b.speed-=b.speed*(0.08f+d.brake*3.5f)*dt;
+    const float acceleration=(d.throttle>=0?2.6f:1.8f);
+    const float motor=d.throttle*acceleration*traction;
+    const float speedAbs=std::fabs(b.speed);
+    const float drag=0.0065f*b.speed*speedAbs;
+    const float braking=(d.brake*6.5f+0.11f)*(b.speed>0?1.0f:(b.speed<0?-1.0f:0.0f));
+    b.speed+= (motor-drag-braking)*frameDt;
+    if((oldSpeed>0&&b.speed<0&&d.throttle>=0) ||
+       (oldSpeed<0&&b.speed>0&&d.throttle<=0))b.speed=0.0f;
+    if(std::fabs(b.speed)<0.03f && std::fabs(d.throttle)<0.01f)b.speed=0.0f;
     b.speed=clamp(b.speed,-5.5f,22.0f);
-    b.heading+=std::tan(b.steer*0.47f)*b.speed/6.2f*dt;
-    b.x+=std::sin(b.heading)*b.speed*dt;
-    b.z+=std::cos(b.heading)*b.speed*dt;
-    if(collidesBuildings(b.x,b.z,b.heading)) {
-        b.x-=std::sin(b.heading)*b.speed*dt;
-        b.z-=std::cos(b.heading)*b.speed*dt;
-        b.speed*=-0.1f;
+    const float accelReal=(b.speed-oldSpeed)/frameDt;
+
+    // Relaxed single-track yaw response: slower bus steering and realistic
+    // high-speed understeer, with grip-limited lateral acceleration.
+    const float centerAngle=b.steer*steerLimit(b.speed);
+    const float understeer=1.0f+0.002f*b.speed*b.speed;
+    float desiredYaw=b.speed*std::tan(centerAngle)/(STEER_WHEELBASE*understeer);
+    const float yawGrip=MAX_LATERAL_ACCEL/std::max(std::fabs(b.speed),1.0f);
+    desiredYaw=clamp(desiredYaw,-yawGrip,yawGrip);
+    d.yawRate+=(desiredYaw-d.yawRate)*clamp(frameDt*3.5f,0.0f,1.0f);
+    d.yawRate=clamp(d.yawRate,-yawGrip,yawGrip);
+    d.lateralSpeed+=(-4.5f*d.lateralSpeed-b.speed*d.yawRate)*frameDt;
+    d.lateralSpeed=clamp(d.lateralSpeed,-2.0f,2.0f);
+    b.heading+=d.yawRate*frameDt;
+    if(b.heading>PI)b.heading-=2.0f*PI;
+    if(b.heading<-PI)b.heading+=2.0f*PI;
+    const float sine=std::sin(b.heading),cosine=std::cos(b.heading);
+    const float oldX=b.x,oldZ=b.z;
+    b.x+=(sine*b.speed+cosine*d.lateralSpeed)*frameDt;
+    b.z+=(cosine*b.speed-sine*d.lateralSpeed)*frameDt;
+    if(collidesBuildings(b.x,b.z,b.heading)){
+        b.x=oldX;b.z=oldZ;b.speed*=-0.08f;
+        d.yawRate=0.0f;d.lateralSpeed=0.0f;
     }
-    b.wheelRotation+=b.speed/WHEEL_RADIUS*dt;
+    b.wheelRotation+=b.speed/WHEEL_RADIUS*frameDt;
+    if(std::fabs(b.wheelRotation)>10000.0f)
+        b.wheelRotation=std::fmod(b.wheelRotation,2.0f*PI);
     const float kmh=std::fabs(b.speed)*3.6f;
-    if(!d.manualGear) {
+    if(!d.manualGear){
         if(d.throttle>0.0f && b.gear<6 && kmh>b.gear*18.0f)++b.gear;
         if(b.gear>1 && kmh<(b.gear-1)*15.0f)--b.gear;
     }
-    b.rpm=clamp(700.0f+kmh*95.0f/std::max(1,b.gear)+std::fabs(d.throttle)*400.0f,700,3400);
-    suspension(d,dt);
+    b.rpm=clamp(700.0f+kmh*95.0f/std::max(1,b.gear)+std::fabs(d.throttle)*400.0f,700.0f,3400.0f);
+    suspension(d,frameDt,accelReal);
     Stop s=stop((int)b.nextStop);
     const float dx=b.x-s.x,dz=b.z-s.z;
     const float distance2=dx*dx+dz*dz;
