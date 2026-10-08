@@ -535,7 +535,7 @@ inline void step(Dynamics& d,float dt) {
 
 		const float rpmFromWheels = drivenRpm(
 			*drive,
-			b.gear,
+			d.throttle < 0.0f ? -1 : b.gear,
 			b.speed
 		);
 		const float freeRevTarget =
