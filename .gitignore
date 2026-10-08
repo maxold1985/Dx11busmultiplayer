@@ -1,0 +1,9 @@
+build_*/
+cmake-build-*/
+*.exe
+*.o
+*.obj
+*.cso
+*.dll
+*.pdb
+CMakeFiles/
