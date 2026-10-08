@@ -28,6 +28,8 @@ Para importar modelos GLB/FBX instale Assimp compilado para i686 com ABI compati
 
 Execute primeiro build_mingw32/bus_server.exe, depois build_mingw32/bus_client.exe. Na janela digite o IPv4 do servidor, como 127.0.0.1. Para outros computadores, use o IPv4 da rede local, liberando porta UDP 27015 no firewall. Pode executar bus_client.exe 192.168.1.10 para conectar diretamente.
 
+Detalhes e parametros de ajuste: [suspensao e direcao](docs/SUSPENSION_STEERING.md).
+
 ## Controles
 
 | Tecla | Comando |
