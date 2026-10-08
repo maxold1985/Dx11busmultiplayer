@@ -67,6 +67,7 @@ int main() {
         f<<"[newanim]\norigin_trans\n1\n3\n2\nanim_rot\nWheel_Rotation_0_L\n57.2957795\n";
         f<<"[mesh]\nRodas\\roda.o3d\n[newanim]\norigin_from_mesh\n";
         f<<"anim_trans\nAxle_Suspension_0_L\n1\n";
+        f<<"[LOD]\n0.1\n[mesh]\nDetalhe\\detalhe.o3d\n[LOD]\n1\n[mesh]\nBaixo\\baixo.o3d\n";
     }
     {
         std::ofstream f(vehicle);
@@ -75,7 +76,7 @@ int main() {
     std::vector<omsi::MeshEntry> entries;
     std::string error;
     assert(omsi::readModelList(vehicle,entries,&error));
-    assert(entries.size()==2);
+    assert(entries.size()==3);
     assert(entries[0].path=="Body/carroceria.o3d");
     assert(entries[1].path=="Rodas/roda.o3d");
     assert(entries[0].animations.size()==1);
