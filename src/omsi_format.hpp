@@ -23,6 +23,7 @@ struct Material {
     Material() {rgba[0]=rgba[1]=rgba[2]=rgba[3]=1.0f;}
 };
 struct Mesh {
+    std::string objectName; // Identificador 3DS para vincular as rodas ao chassi.
     std::vector<Vertex> vertices;
     std::vector<Triangle> triangles;
     std::vector<Material> materials;
