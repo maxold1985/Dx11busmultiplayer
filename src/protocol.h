@@ -13,7 +13,7 @@ static const int MAX_BUSES = MAX_PLAYERS + AI_BUSES;
 static const uint32_t BUS_MAGIC = 0x42555332; // BUS2: protocolo alterado, ambos precisam desta versao
 
 enum { PACKET_INPUT=1, PACKET_WORLD=2 };
-enum { INPUT_TOGGLE_DOOR=1, INPUT_GEAR_UP=2, INPUT_GEAR_DOWN=4 };
+enum { INPUT_TOGGLE_DOOR=1, INPUT_GEAR_UP=2, INPUT_GEAR_DOWN=4, INPUT_AUTO_GEAR=8 };
 #pragma pack(push,1)
 struct BusState {
     uint32_t id;
