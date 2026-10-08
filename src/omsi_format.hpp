@@ -235,7 +235,7 @@ inline float parseFloat(const std::string& s,float fallback=0) {
 inline bool readModelList(const std::string& input,std::vector<MeshEntry>& entries,std::string* error=0) {
     entries.clear();
     const std::string suffix=lower(input.substr(input.find_last_of('.')==std::string::npos?input.size():input.find_last_of('.')));
-    if(suffix==".o3d"||suffix==".x") {
+    if(suffix==".o3d"||suffix==".x"||suffix==".3ds") {
         MeshEntry e;e.path=input;entries.push_back(e);return true;
     }
     std::string cfg=input;
