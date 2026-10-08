@@ -12,8 +12,27 @@ static const float WHEEL_RADIUS=0.48f, SPRING_REST=0.88f;
 static const float BUS_MASS=12000.0f, GRAVITY=9.81f;
 static const float SUSPENSION_SAG=0.20f; // Compression at rest on level ground.
 static const float STEER_WHEELBASE=5.0f, STEER_TRACK=2.08f;
-static const float MAX_LATERAL_ACCEL=3.25f; // Passenger-bus tire grip / comfort.
-struct Box { float x,z,hx,hz; };
+static const float MAX_LATERAL_ACCEL = 3.25f;
+static const float MAP_ROAD_SPACING = 60.0f;
+static const int MAP_GRID_RADIUS = 34;
+static const float MAP_HALF_EXTENT = MAP_GRID_RADIUS * MAP_ROAD_SPACING;
+static const int MAP_RENDER_RADIUS = 5;
+
+struct Box {
+	float x;
+	float z;
+	float hx;
+	float hz;
+};
+
+inline bool insideMap(float x, float z, float margin = 0.0f) {
+	const float limit = MAP_HALF_EXTENT - margin;
+	return std::fabs(x) <= limit && std::fabs(z) <= limit;
+}
+
+inline int roadIndex(float coordinate) {
+	return (int)std::floor(coordinate / MAP_ROAD_SPACING);
+}
 
 inline float clamp(float x,float mn,float mx) {return std::max(mn,std::min(mx,x));}
 inline float terrain(float x,float z) {
@@ -28,7 +47,13 @@ inline float wheelOffsetX(int wheel) {return (wheel&1)?STEER_TRACK*0.5f:-STEER_T
 inline float wheelOffsetZ(int wheel) {return wheel<2?2.70f:(wheel<4?-1.20f:-2.65f);}
 
 inline Box building(int i,int j) {
-    Box b={30.0f+60.0f*i,30.0f+60.0f*j,10.0f,11.0f};return b;
+	Box b = {
+		MAP_ROAD_SPACING * (float)i + MAP_ROAD_SPACING * 0.5f,
+		MAP_ROAD_SPACING * (float)j + MAP_ROAD_SPACING * 0.5f,
+		10.0f,
+		11.0f
+	};
+	return b;
 }
 inline bool overlaps(float ax,float az,float ahx,float ahz,float yaw,
                      float bx,float bz,float bhx,float bhz,float byaw) {
@@ -50,8 +75,12 @@ inline bool overlaps(float ax,float az,float ahx,float ahz,float yaw,
     return true;
 }
 inline bool collidesBuildings(float x,float z,float heading) {
-    int i0=(int)std::floor((x-30.0f)/60.0f);
-    int j0=(int)std::floor((z-30.0f)/60.0f);
+	if(!insideMap(x, z, BUS_HALF_LENGTH + 2.0f)) {
+		return true;
+	}
+
+	int i0 = (int)std::floor((x - 30.0f) / MAP_ROAD_SPACING);
+	int j0 = (int)std::floor((z - 30.0f) / MAP_ROAD_SPACING);
     for(int i=i0;i<=i0+1;i++)for(int j=j0;j<=j0+1;j++) {
         Box b=building(i,j);
         if(overlaps(x,z,BUS_HALF_WIDTH,BUS_HALF_LENGTH,heading,
@@ -61,11 +90,49 @@ inline bool collidesBuildings(float x,float z,float heading) {
 }
 struct Stop { float x,z; int waiting; };
 inline Stop stop(int i) {
-    const float p[6][2]={{4.9f,18.0f},{4.9f,78.0f},{4.9f,138.0f},
-                         {-4.9f,-18.0f},{-4.9f,-78.0f},{-4.9f,-138.0f}};
-    Stop s={p[i%6][0],p[i%6][1],8};return s;
+	// Stops near the origin are preserved; additional stops extend into
+	// neighborhoods across the 4.08 km wide playable area.
+	static const float positions[][2] = {
+		{ 4.9f, 18.0f },
+		{ 4.9f, 78.0f },
+		{ 4.9f, 138.0f },
+		{-4.9f, -18.0f },
+		{-4.9f, -78.0f },
+		{-4.9f, -138.0f },
+		{ 4.9f, 378.0f },
+		{ 4.9f, 798.0f },
+		{ 4.9f, 1218.0f },
+		{ 4.9f, 1638.0f },
+		{604.9f, 1638.0f },
+		{1204.9f, 1638.0f },
+		{1804.9f, 1638.0f },
+		{1804.9f, 1018.0f },
+		{1804.9f, 418.0f },
+		{1804.9f, -182.0f },
+		{-4.9f, -378.0f },
+		{-4.9f, -798.0f },
+		{-4.9f, -1218.0f },
+		{-4.9f, -1638.0f },
+		{-604.9f, -1638.0f },
+		{-1204.9f, -1638.0f },
+		{-1804.9f, -1638.0f },
+		{-1804.9f, -1018.0f },
+		{-1804.9f, -418.0f },
+		{-1804.9f, 182.0f },
+		{-1204.9f, 618.0f },
+		{-604.9f, 1018.0f }
+	};
+
+	const int index = (i % 28 + 28) % 28;
+	Stop result = {
+		positions[index][0],
+		positions[index][1],
+		8
+	};
+	return result;
 }
-static const int STOP_COUNT=6;
+static const int STOP_COUNT = 28;
+
 // One raycast per wheel, along world -Y, against the heightfield road.
 struct RayHit {
     bool hit;
@@ -146,11 +213,28 @@ struct Dynamics {
         }
     }
 };
+// Reset executed by the authoritative server; preserve the network identity.
+inline void resetOrigin(Dynamics& dynamics) {
+	const uint32_t savedId = dynamics.b.id;
+	dynamics = Dynamics();
+	dynamics.b.id = savedId;
+	dynamics.b.x = 0.0f;
+	dynamics.b.z = 0.0f;
+	dynamics.b.heading = 0.0f;
+}
+
 inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
     d.throttle=clamp(t,-1,1);
     d.steering=clamp(steer,-1,1);
     d.brake=clamp(brake,0,1);
     const uint32_t pressed=flags & ~d.lastFlags;
+	if((pressed & INPUT_RESET_ORIGIN) != 0) {
+		resetOrigin(d);
+		// Preserve the held-key state to avoid resetting every UDP packet.
+		d.lastFlags = flags;
+		return;
+	}
+
     if(pressed&INPUT_TOGGLE_DOOR) {
         if(std::fabs(d.b.speed)<0.5f) d.b.door=d.b.door>0.5f?0.0f:1.0f;
     }
