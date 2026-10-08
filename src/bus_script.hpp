@@ -608,10 +608,14 @@ struct ModScripts {
 	std::string soundDirectory;
 	std::string soundConfigPath;
 	std::string diagnostic;
+	float soundMaxRpm;
 	bool hasManual;
 	bool hasAutomatic;
 
-	ModScripts() : hasManual(false), hasAutomatic(false) {}
+	ModScripts() :
+		soundMaxRpm(3000.0f),
+		hasManual(false),
+		hasAutomatic(false) {}
 
 	bool load(const std::string& entryPath) {
 		*this = ModScripts();
@@ -643,6 +647,16 @@ struct ModScripts {
 			}
 
 			sounds = readSounds(descriptor);
+			const Section* soundManager = descriptor.find("sound_manager");
+
+			if(soundManager != 0) {
+				soundMaxRpm = bounded(
+					soundManager->number("max_rpm", 3000.0f),
+					500.0f,
+					6000.0f
+				);
+			}
+
 			soundConfigPath = entryPath;
 			soundDirectory = root;
 			return hasAutomatic || hasManual || !sounds.empty();
@@ -672,6 +686,15 @@ struct ModScripts {
 		if(!soundPath.empty() && script.load(soundPath)) {
 			sounds = readSounds(script);
 			soundConfigPath = soundPath;
+
+			const Section* manager = script.find("sound_manager");
+			if(manager != 0) {
+				soundMaxRpm = bounded(
+					manager->number("max_rpm", 3000.0f),
+					500.0f,
+					6000.0f
+				);
+			}
 		}
 
 		soundDirectory = root;
@@ -709,6 +732,15 @@ struct ModScripts {
 		for(size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
 			if(exists(candidates[i])) {
 				return candidates[i];
+			}
+
+			// Some sound entries omit the file suffix (e.g. "5i").
+			if(exists(candidates[i] + ".ogg")) {
+				return candidates[i] + ".ogg";
+			}
+
+			if(exists(candidates[i] + ".wav")) {
+				return candidates[i] + ".wav";
 			}
 		}
 
