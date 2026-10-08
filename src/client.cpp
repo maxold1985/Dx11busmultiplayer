@@ -10,6 +10,8 @@
 #include "math_compat.h"
 #include "audio_motor.hpp"
 #include "model_assimp.hpp"
+#include "omsi_dx11.hpp"
+#include <commdlg.h>
 #include <windows.h>
 #include <d3d11.h>
 #include <stdio.h>
@@ -21,7 +23,7 @@
 using namespace DirectX;
 
 struct SceneConstants {XMFLOAT4X4 transform;XMFLOAT4 color;XMFLOAT4 flags;};
-static HWND windowHandle=0,ipLabel=0,ipInput=0,connectButton=0;
+static HWND windowHandle=0,ipLabel=0,ipInput=0,connectButton=0,omsiButton=0;
 static ID3D11Device* device=0;
 static ID3D11DeviceContext* context=0;
 static IDXGISwapChain* swapChain=0;
@@ -37,6 +39,8 @@ static ID3D11SamplerState* sampler=0;
 static ID3D11ShaderResourceView* roadTexture=0;
 static ID3D11ShaderResourceView* busTexture=0;
 static ModelAsset busModel;
+static omsi::Bus omsiBus;
+static bool useOmsi=false;
 static bool useModel=false,connected=false,running=true,cockpit=false;
 static SOCKET socketUdp=INVALID_SOCKET;
 static sockaddr_in serverAddress={};
@@ -161,6 +165,7 @@ static void shutdownGraphics(){
     motor.stop();
     if(context)context->ClearState();
     busModel.clear();
+    omsiBus.clear();
     releaseObj(roadTexture);releaseObj(busTexture);releaseObj(sampler);
     releaseObj(constants);releaseObj(cubeVB);releaseObj(layout);
     releaseObj(pixelShader);releaseObj(vertexShader);releaseObj(depthView);
@@ -208,9 +213,31 @@ static void drawAssimpBus(const BusState& b,const XMFLOAT4& tint) {
     }
     context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
 }
+static void drawOmsiBus(const BusState& b){
+    // OMSI exporta vertices em X-direita, Y-cima, Z-frente.
+    // O centro da dinamica do DX11Bus e 1.6 m acima do nivel das rodas.
+    XMMATRIX placement=XMMatrixRotationZ(b.roll)*
+        XMMatrixRotationX(b.pitch)*XMMatrixRotationY(b.heading)*
+        XMMatrixTranslation(b.x,b.y-1.6f,b.z);
+    for(size_t i=0;i<omsiBus.meshes.size();i++){
+        const omsi::GpuMesh& mesh=omsiBus.meshes[i];
+        XMMATRIX world=omsi::animationTransform(mesh,b)*placement;
+        UINT stride=sizeof(MeshVertex),offset=0;
+        context->IASetVertexBuffers(0,1,&mesh.vertices,&stride,&offset);
+        for(size_t j=0;j<mesh.parts.size();j++){
+            const omsi::DrawPart& part=mesh.parts[j];
+            setWorld(world,XMFLOAT4(part.rgba[0],part.rgba[1],part.rgba[2],part.rgba[3]),part.texture);
+            context->IASetIndexBuffer(part.indices,DXGI_FORMAT_R32_UINT,0);
+            context->DrawIndexed(part.count,0,0);
+        }
+    }
+    context->IASetIndexBuffer(0,DXGI_FORMAT_UNKNOWN,0);
+}
+
 static void drawBus(const BusState& b,bool mine) {
     XMFLOAT4 paint=mine?XMFLOAT4(1,0.73f,0.23f,1):XMFLOAT4(0.23f,0.78f,0.94f,1);
     XMFLOAT4 black(0.075f,0.095f,0.14f,1),rubber(0.035f,0.035f,0.04f,1);
+    if(useOmsi){drawOmsiBus(b);return;}
     if(useModel)drawAssimpBus(b,XMFLOAT4(1,1,1,1));
     else {
         drawBusPart(b,0,0.50f,0,1.17f,1.27f,3.83f,paint,busTexture);
@@ -380,12 +407,45 @@ static bool connectTo(const char* ipv4) {
     motor.start();
     return true;
 }
+static void browseOmsiModel(HWND hwnd){
+    char filename[MAX_PATH]={};
+    OPENFILENAMEA chooser={};chooser.lStructSize=sizeof(chooser);
+    chooser.hwndOwner=hwnd;
+    chooser.lpstrFile=filename;chooser.nMaxFile=MAX_PATH;
+    chooser.lpstrFilter="OMSI bus and model (*.bus;*.ovh;*.cfg;*.o3d)\0*.bus;*.ovh;*.cfg;*.o3d\0All files (*.*)\0*.*\0";
+    chooser.nFilterIndex=1;
+    chooser.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR;
+    if(!GetOpenFileNameA(&chooser))return;
+    omsi::Bus candidate;
+    const bool success=omsi::load(device,filename,candidate);
+    FILE* log=fopen((applicationDirectory()+"omsi_import.log").c_str(),"wb");
+    if(log){
+        fprintf(log,"File: %s\nResult: %s\n%s\n",filename,success?"partial/success":"failed",candidate.report.c_str());
+        fclose(log);
+    }
+    if(success){
+        // Move manual: liberamos o asset anterior antes de trocar.
+        omsiBus.clear();
+        omsiBus.meshes.swap(candidate.meshes);
+        omsiBus.textureCache.swap(candidate.textureCache);
+        omsiBus.report=candidate.report;
+        omsiBus.source=candidate.source;
+        omsiBus.imported=candidate.imported;
+        omsiBus.missing=candidate.missing;
+        useOmsi=true;
+        MessageBoxA(hwnd,omsiBus.report.c_str(),"Modelo OMSI importado (veja omsi_import.log)",MB_OK);
+    } else {
+        MessageBoxA(hwnd,candidate.report.c_str(),"Falha ao importar OMSI",MB_OK|MB_ICONWARNING);
+    }
+}
+
 static LRESULT CALLBACK windowProcedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_DESTROY){running=false;PostQuitMessage(0);return 0;}
     if(msg==WM_KEYDOWN){
         if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}
         if(w==VK_F1 && !((l>>30)&1)){cockpit=!cockpit;return 0;}
     }
+    if(msg==WM_COMMAND && LOWORD(w)==103){browseOmsiModel(hwnd);return 0;}
     if(msg==WM_COMMAND && LOWORD(w)==102){
         char ipv4[80]={};GetWindowTextA(ipInput,ipv4,80);
         if(!connectTo(ipv4))
@@ -409,10 +469,20 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
          140,14,180,27,windowHandle,(HMENU)101,instance,0);
     connectButton=CreateWindowA("BUTTON","Conectar",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
          335,14,110,27,windowHandle,(HMENU)102,instance,0);
+    omsiButton=CreateWindowA("BUTTON","Carregar OMSI (.bus)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
+         460,14,195,27,windowHandle,(HMENU)103,instance,0);
     ShowWindow(windowHandle,show);
     if(!initializeGraphics(windowHandle)){
         MessageBoxA(windowHandle,"Nao foi possivel inicializar DX11 ou carregar os shaders .cso.","DX11 Bus",MB_ICONERROR);
         shutdownGraphics();return 1;
+    }
+    // Pode abrir modelo diretamente com a variavel de ambiente do usuario.
+    char pathEnv[2048]={};
+    DWORD envLength=GetEnvironmentVariableA("DX11BUS_OMSI_BUS",pathEnv,sizeof(pathEnv));
+    if(envLength>0 && envLength<sizeof(pathEnv)){
+        useOmsi=omsi::load(device,pathEnv,omsiBus);
+        FILE* log=fopen((applicationDirectory()+"omsi_import.log").c_str(),"wb");
+        if(log){fprintf(log,"%s\n",omsiBus.report.c_str());fclose(log);}
     }
     std::string cmd=commandLine;
     if(!cmd.empty()){
