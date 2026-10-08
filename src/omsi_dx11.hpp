@@ -359,22 +359,29 @@ inline DirectX::XMMATRIX wheelTransform(const GpuMesh& mesh,const BusState& stat
         return identity();
     const float x=mesh.wheelPivot[0],y=mesh.wheelPivot[1],z=mesh.wheelPivot[2];
     const float spin=state.wheelRotation*(sim::WHEEL_RADIUS/mesh.wheelRadius);
-    const float steer=mesh.nativeWheel<2?state.steer*0.47f:0.0f;
-    // Row-vector convention: spin around axle X, steer around vertical Y.
-    // Pivots are shared among every part of the same 3DS wheel group.
+    const float steer=sim::wheelSteerAngle(state,mesh.nativeWheel);
+    // Compression moves the wheel UP relative to the chassis.
+    // Zero displacement corresponds to the model's level resting posture.
+    const float travel=sim::visualTravel(state,mesh.nativeWheel)-sim::SUSPENSION_SAG;
+    // Row-vector convention: X is the axle (rolling), Y is vertical (steering).
+    // Every part of the tire, rim and hub uses the same axle pivot.
     return XMMatrixTranslation(-x,-y,-z)*
            XMMatrixRotationX(spin)*XMMatrixRotationY(steer)*
-           XMMatrixTranslation(x,y,z);
+           XMMatrixTranslation(x,y+travel,z);
 }
 inline float variableValue(const std::string& variable,const BusState& state) {
     const std::string v=lower(variable);
     if(v.find("wheel_rotation_")==0)return state.wheelRotation;
-    if(v.find("axle_steering_")==0)return (v.find("axle_steering_0_")==0)?state.steer*0.47f:0;
+    if(v.find("axle_steering_")==0){
+        if(v.find("axle_steering_0_")!=0)return 0.0f;
+        const char side=v[v.size()-1];
+        return sim::wheelSteerAngle(state,side=='r'?1:0);
+    }
     if(v.find("axle_suspension_")==0){
         unsigned axle=0;char side='L';
         if(sscanf(v.c_str(),"axle_suspension_%u_%c",&axle,&side)==2 && axle<3){
             const int wheel=(int)axle*2+(side=='r'?1:0);
-            return sim::visualTravel(state,wheel)-0.50f;
+            return sim::visualTravel(state,wheel)-sim::SUSPENSION_SAG;
         }
         return 0;
     }
