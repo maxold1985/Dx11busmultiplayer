@@ -28,6 +28,9 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.BufferedInputStream;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipEntry;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,6 +43,7 @@ public final class BusActivity extends Activity {
     private static final int PICK_MODEL = 101;
     private static final int PICK_SCRIPT = 102;
     private static final int PICK_FOLDER = 103;
+    private static final int PICK_ZIP = 104;
     private static final int MAX_FILES = 12000;
     private static final long MAX_TOTAL_BYTES = 1536L * 1024L * 1024L;
 
@@ -84,7 +88,7 @@ public final class BusActivity extends Activity {
     };
     private String importedModel = "";
     private String importedScript = "";
-    private File lastImportedFolder = null;
+    private volatile File lastImportedFolder = null;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -163,6 +167,7 @@ public final class BusActivity extends Activity {
         addAction(actions,"MODELO",() -> openFile(PICK_MODEL));
         addAction(actions,"SCRIPT",() -> openFile(PICK_SCRIPT));
         addAction(actions,"PASTA OMSI",this::openFolder);
+        addAction(actions,"ZIP OMSI",() -> openFile(PICK_ZIP));
         addAction(actions,"MODELOS MOD",() -> chooseFromImportedFolder(false));
         addAction(actions,"SCRIPTS MOD",() -> chooseFromImportedFolder(true));
         addAction(actions,"CONECTAR",this::askServer);
@@ -415,23 +420,24 @@ public final class BusActivity extends Activity {
                     CopyCounter counter=new CopyCounter();
                     String rootId=DocumentsContract.getTreeDocumentId(uri);
                     copyTree(uri,rootId,folder,counter,0);
-                    lastImportedFolder=folder;
-                    ImportSelection selection=new ImportSelection();
-                    importedModel="";
-                    importedScript="";
-                    findCandidates(folder,selection);
-                    if(selection.model!=null) importedModel=selection.model.getAbsolutePath();
-                    if(selection.script!=null) importedScript=selection.script.getAbsolutePath();
-                    surface.queueEvent(() -> {
-                        boolean modelOk=!importedModel.isEmpty() && nativeLoadModel(importedModel);
-                        boolean scriptOk=!importedScript.isEmpty() && nativeLoadScript(importedScript);
-                        runOnUiThread(() -> toast("Pasta copiada: "+counter.files+
-                            " arquivos | Modelo: "+modelOk+" | Script: "+scriptOk));
-                    });
+                    finishImportedFolder(folder,counter.files);
                 } catch(Exception error) {
                     runOnUiThread(() -> toast("Falha na importacao: "+error.getMessage()));
                 }
             },"OMSI-folder-import").start();
+        } else if(request==PICK_ZIP) {
+            toast("Extraindo ZIP OMSI...");
+            new Thread(() -> {
+                try {
+                    File folder=new File(getFilesDir(),"omsi_zip_"+System.currentTimeMillis());
+                    if(!folder.mkdirs())throw new Exception("Falha criando diretorio ZIP");
+                    CopyCounter counter=new CopyCounter();
+                    copyZip(uri,folder,counter);
+                    finishImportedFolder(folder,counter.files);
+                } catch(Exception error) {
+                    runOnUiThread(() -> toast("Falha no ZIP: "+error.getMessage()));
+                }
+            },"OMSI-zip-import").start();
         } else {
             toast("Copiando arquivo...");
             new Thread(() -> {
@@ -459,6 +465,68 @@ public final class BusActivity extends Activity {
                 }
             },"OMSI-file-import").start();
         }
+    }
+    private void finishImportedFolder(File folder,int copiedFiles) {
+        lastImportedFolder=folder;
+        ImportSelection selection=new ImportSelection();
+        findCandidates(folder,selection);
+        final String model=selection.model!=null?selection.model.getAbsolutePath():"";
+        final String script=selection.script!=null?selection.script.getAbsolutePath():"";
+        importedModel=model;
+        importedScript=script;
+        surface.queueEvent(() -> {
+            boolean modelOk=!model.isEmpty() && nativeLoadModel(model);
+            boolean scriptOk=!script.isEmpty() && nativeLoadScript(script);
+            runOnUiThread(() -> toast("Importado: "+copiedFiles+
+                " arquivos | Modelo: "+modelOk+" | Script: "+scriptOk));
+        });
+    }
+    private void copyZip(Uri uri,File directory,CopyCounter counter) throws Exception {
+        final String safeRoot=directory.getCanonicalPath()+File.separator;
+        int entries=0;
+        try(InputStream input=getContentResolver().openInputStream(uri)) {
+            if(input==null)throw new Exception("ZIP inacessivel");
+            try(ZipInputStream zip=new ZipInputStream(new BufferedInputStream(input))) {
+                ZipEntry entry;
+                byte[] buffer=new byte[65536];
+                while((entry=zip.getNextEntry())!=null) {
+                    if(++entries>MAX_FILES*2)
+                        throw new Exception("ZIP possui entradas demais");
+                    String relative=entry.getName().replace('\\','/');
+                    if(relative.length()>1024 || relative.startsWith("/") ||
+                       relative.indexOf(':')>=0)
+                        throw new Exception("Caminho ZIP invalido");
+                    File out=new File(directory,relative);
+                    String canonical=out.getCanonicalPath();
+                    if(!canonical.startsWith(safeRoot))
+                        throw new Exception("ZIP com caminho fora da pasta");
+                    if(entry.isDirectory()) {
+                        if(!out.isDirectory() && !out.mkdirs())
+                            throw new Exception("Falha criando diretorio ZIP");
+                    } else {
+                        if(++counter.files>MAX_FILES)
+                            throw new Exception("ZIP possui arquivos demais");
+                        File parent=out.getParentFile();
+                        if(parent!=null && !parent.exists() && !parent.mkdirs())
+                            throw new Exception("Falha criando pasta do ZIP");
+                        long local=0;
+                        try(FileOutputStream file=new FileOutputStream(out)) {
+                            int length;
+                            while((length=zip.read(buffer))!=-1) {
+                                local+=length;
+                                counter.bytes+=length;
+                                if(local>256L*1024L*1024L ||
+                                   counter.bytes>MAX_TOTAL_BYTES)
+                                    throw new Exception("ZIP excede limite de tamanho");
+                                file.write(buffer,0,length);
+                            }
+                        }
+                    }
+                    zip.closeEntry();
+                }
+            }
+        }
+        if(counter.files==0)throw new Exception("ZIP nao contem arquivos");
     }
     private String displayName(Uri uri) {
         try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},
