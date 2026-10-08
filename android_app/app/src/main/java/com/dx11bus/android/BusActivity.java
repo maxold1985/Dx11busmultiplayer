@@ -52,13 +52,23 @@ public final class BusActivity extends Activity {
     public static native void nativeCamera(float dx, float dy, float zoom);
     public static native void nativeCockpit();
     public static native String nativeStatus();
+    public static native void nativeSoundEvent(String event);
+    public static native void nativePause();
+    public static native void nativeResume();
+    public static native void nativeZoom(float amount);
 
     private GLSurfaceView surface;
     private TextView status;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean forward, reverse, left, right, brake, clutch;
-    private float touchX, touchY;
+    private float touchX, touchY, pinchDistance;
     private boolean dragging;
+    private final Runnable frameTicker=new Runnable() {
+        @Override public void run() {
+            if(surface!=null)surface.requestRender();
+            handler.postDelayed(this,33);
+        }
+    };
     private String importedModel = "";
     private String importedScript = "";
 
@@ -86,20 +96,35 @@ public final class BusActivity extends Activity {
                 nativeDraw();
             }
         });
-        surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+        // 30 FPS limits CPU/GPU use and battery drain on mobile devices.
+        surface.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
         surface.setOnTouchListener((v, e) -> {
-            if(e.getPointerCount()>1) return true;
             switch(e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     touchX=e.getX();touchY=e.getY();dragging=true;return true;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    if(e.getPointerCount()>1) {
+                        pinchDistance=(float)Math.hypot(e.getX(1)-e.getX(0),
+                                                           e.getY(1)-e.getY(0));
+                        dragging=false;
+                    }
+                    return true;
                 case MotionEvent.ACTION_MOVE:
-                    if(dragging) {
+                    if(e.getPointerCount()>1) {
+                        float next=(float)Math.hypot(e.getX(1)-e.getX(0),
+                                                    e.getY(1)-e.getY(0));
+                        final float zoom=(pinchDistance-next)*0.025f;
+                        pinchDistance=next;
+                        surface.queueEvent(() -> nativeZoom(zoom));
+                    } else if(dragging) {
                         final float dx=(e.getX()-touchX)*0.008f;
                         final float dy=(e.getY()-touchY)*0.005f;
                         touchX=e.getX();touchY=e.getY();
                         surface.queueEvent(() -> nativeCamera(dx,dy,0));
                     }
                     return true;
+                case MotionEvent.ACTION_POINTER_UP:
+                    dragging=false;return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     dragging=false;return true;
@@ -114,7 +139,7 @@ public final class BusActivity extends Activity {
         status = new TextView(this);
         status.setTextColor(Color.WHITE);
         status.setTextSize(12);
-        status.setMaxLines(3);
+        status.setMaxLines(4);
         status.setText("Android OpenGL ES 3.0 | Aguardando...");
         status.setPadding(dp(8),dp(3),dp(8),dp(3));
         top.addView(status);
@@ -126,6 +151,8 @@ public final class BusActivity extends Activity {
         addAction(actions,"PASTA OMSI",this::openFolder);
         addAction(actions,"CONECTAR",this::askServer);
         addAction(actions,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
+        addAction(actions,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
+        addAction(actions,"ZOOM -",() -> surface.queueEvent(() -> nativeZoom(2.0f)));
         addAction(actions,"RESET",() -> surface.queueEvent(() -> nativeFlag(16)));
         tools.addView(actions);
         top.addView(tools);
@@ -153,6 +180,10 @@ public final class BusActivity extends Activity {
         addAction(other,"MARCHA -",() -> surface.queueEvent(() -> nativeFlag(4)));
         addAction(other,"AUTO",() -> surface.queueEvent(() -> nativeFlag(8)));
         addAction(other,"DIRECAO OMSI",() -> surface.queueEvent(() -> nativeFlag(32)));
+        addAction(other,"BUZINA",() -> surface.queueEvent(() -> nativeSoundEvent("horn")));
+        addAction(other,"PARADA",() -> surface.queueEvent(() -> nativeSoundEvent("stopRequest")));
+        addAction(other,"SETA",() -> surface.queueEvent(() -> nativeSoundEvent("blinkers")));
+        addAction(other,"FREIO MAO",() -> surface.queueEvent(() -> nativeSoundEvent("parkingBrakeOn")));
         otherScroll.addView(other);
         bottom.addView(otherScroll);
         FrameLayout.LayoutParams bottomParams=new FrameLayout.LayoutParams(
@@ -232,12 +263,13 @@ public final class BusActivity extends Activity {
     private void askServer() {
         EditText ip=new EditText(this);
         ip.setSingleLine(true);
-        ip.setText("192.168.1.10");
+        ip.setText(getPreferences(MODE_PRIVATE).getString("lastServer","192.168.1.10"));
         ip.setSelectAllOnFocus(true);
         new AlertDialog.Builder(this).setTitle("Servidor BUS4 (IPv4)")
             .setView(ip)
             .setPositiveButton("Conectar",(dialog,which)->{
                 String address=ip.getText().toString().trim();
+                getPreferences(MODE_PRIVATE).edit().putString("lastServer",address).apply();
                 surface.queueEvent(() -> {
                     boolean ok=nativeConnect(address);
                     runOnUiThread(() -> toast(ok?"Tentando conexao UDP...":"Endereco IPv4 invalido"));
@@ -254,13 +286,22 @@ public final class BusActivity extends Activity {
     }
     @Override protected void onPause() {
         forward=reverse=left=right=brake=clutch=false;
-        surface.queueEvent(() -> nativeControls(0,0,0,0));
+        handler.removeCallbacks(frameTicker);
+        surface.queueEvent(() -> {
+            nativeControls(0,0,0,0);
+            nativePause();
+        });
         surface.onPause();
         super.onPause();
     }
     @Override protected void onResume() {
         super.onResume();
-        if(surface!=null) surface.onResume();
+        if(surface!=null) {
+            surface.onResume();
+            surface.queueEvent(BusActivity::nativeResume);
+            handler.removeCallbacks(frameTicker);
+            handler.postDelayed(frameTicker,33);
+        }
     }
 
     @Override protected void onActivityResult(int request,int result,Intent data) {
