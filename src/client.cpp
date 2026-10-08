@@ -463,6 +463,15 @@ static const BusState* findBus(const Snapshot& s,uint32_t id){
     return 0;
 }
 static BusState interpolated(const BusState& a,const BusState& b,float t) {
+	// Reset to origin is a teleport, not a physical movement.
+	// Skip interpolation to avoid sweeping the model across the city.
+	const float dx = b.x - a.x;
+	const float dz = b.z - a.z;
+
+	if(dx * dx + dz * dz > 2500.0f) {
+		return b;
+	}
+
     BusState r=b;
     r.x=a.x+(b.x-a.x)*t;r.y=a.y+(b.y-a.y)*t;r.z=a.z+(b.z-a.z)*t;
     float difference=atan2f(sinf(b.heading-a.heading),cosf(b.heading-a.heading));
