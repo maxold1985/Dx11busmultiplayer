@@ -15,6 +15,7 @@
 #include "omsi_format.hpp"
 #include "3ds_format.hpp"
 #include "bus_script.hpp"
+#include "simulation.hpp"
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,"Dx11BusAndroid",__VA_ARGS__)
 
@@ -32,6 +33,9 @@ Mat4 mul(const Mat4& a,const Mat4& b) {
             for(int k=0;k<4;++k)
                 r.m[col*4+row]+=a.m[k*4+row]*b.m[col*4+k];
     return r;
+}
+Mat4 scale(float x,float y,float z) {
+    Mat4 r;r.m[0]=x;r.m[5]=y;r.m[10]=z;return r;
 }
 Mat4 translate(float x,float y,float z) {
     Mat4 r;r.m[12]=x;r.m[13]=y;r.m[14]=z;return r;
@@ -100,7 +104,7 @@ struct GpuMesh {
 };
 std::vector<GpuMesh> models;
 std::map<std::string,GLuint> textureCache;
-GLuint program=0,gridVao=0,gridVbo=0;
+GLuint program=0,gridVao=0,gridVbo=0,boxVao=0,boxVbo=0;
 GLint matrixUniform=-1,colorUniform=-1,useTextureUniform=-1;
 int viewportW=1,viewportH=1;
 int socketFd=-1;
@@ -177,7 +181,7 @@ void resetGpuHandles() {
             models[i].parts[j].ibo=0;models[i].parts[j].texture=0;
         }
     }
-    gridVao=gridVbo=program=0;
+    gridVao=gridVbo=boxVao=boxVbo=program=0;
 }
 void dropModelGpu() {
     for(size_t i=0;i<models.size();++i) {
@@ -463,6 +467,118 @@ void drawBus(const Mat4& pv,const BusState& b,V3 camera) {
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
+void initBox() {
+    const float corners[8][3]={
+        {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
+        {-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}
+    };
+    const int faces[6][4]={
+        {0,3,2,1},{4,5,6,7},{0,1,5,4},
+        {3,7,6,2},{1,2,6,5},{0,4,7,3}
+    };
+    const float uv[4][2]={{0,0},{0,1},{1,1},{1,0}};
+    std::vector<float> triangles;
+    triangles.reserve(36*5);
+    for(int i=0;i<6;++i) {
+        const int v[6]={0,1,2,0,2,3};
+        for(int j=0;j<6;++j) {
+            int k=v[j];
+            const float* p=corners[faces[i][k]];
+            triangles.push_back(p[0]);
+            triangles.push_back(p[1]);
+            triangles.push_back(p[2]);
+            triangles.push_back(uv[k][0]);
+            triangles.push_back(uv[k][1]);
+        }
+    }
+    glGenVertexArrays(1,&boxVao);glBindVertexArray(boxVao);
+    glGenBuffers(1,&boxVbo);glBindBuffer(GL_ARRAY_BUFFER,boxVbo);
+    glBufferData(GL_ARRAY_BUFFER,triangles.size()*sizeof(float),&triangles[0],GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,5*sizeof(float),0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,5*sizeof(float),(void*)(3*sizeof(float)));
+    glBindVertexArray(0);
+}
+void drawBox(const Mat4& pv,float x,float y,float z,float sx,float sy,float sz,
+             float red,float green,float blue) {
+    if(!boxVao)return;
+    const Mat4 matrix=mul(pv,mul(translate(x,y,z),scale(sx,sy,sz)));
+    glUniformMatrix4fv(matrixUniform,1,GL_FALSE,matrix.m);
+    glUniform4f(colorUniform,red,green,blue,1.0f);
+    glUniform1i(useTextureUniform,0);
+    glBindVertexArray(boxVao);
+    glDrawArrays(GL_TRIANGLES,0,36);
+}
+void drawCity(const Mat4& pv,const BusState& focus) {
+    // Same procedural map definition as the Windows client, with a mobile
+    // visibility radius to avoid excessive draw calls.
+    const int cx=sim::roadIndex(focus.x);
+    const int cz=sim::roadIndex(focus.z);
+    const int radius=4;
+    const int minX=std::max(-sim::MAP_GRID_RADIUS,cx-radius);
+    const int maxX=std::min(sim::MAP_GRID_RADIUS,cx+radius);
+    const int minZ=std::max(-sim::MAP_GRID_RADIUS,cz-radius);
+    const int maxZ=std::min(sim::MAP_GRID_RADIUS,cz+radius);
+    drawBox(pv,0,-0.30f,0,sim::MAP_HALF_EXTENT,0.30f,sim::MAP_HALF_EXTENT,
+            0.26f,0.39f,0.20f);
+    for(int i=minX;i<=maxX;++i) {
+        float x=i*sim::MAP_ROAD_SPACING;
+        drawBox(pv,x,0.001f,0,7,0.02f,sim::MAP_HALF_EXTENT,
+                0.55f,0.57f,0.61f);
+    }
+    for(int j=minZ;j<=maxZ;++j) {
+        float z=j*sim::MAP_ROAD_SPACING;
+        drawBox(pv,0,0.001f,z,sim::MAP_HALF_EXTENT,0.02f,7,
+                0.55f,0.57f,0.61f);
+    }
+    for(int i=minX;i<=maxX;++i) {
+        float x=i*sim::MAP_ROAD_SPACING;
+        for(int j=cz-2;j<=cz+2;++j) {
+            if(j < -sim::MAP_GRID_RADIUS||j>=sim::MAP_GRID_RADIUS)continue;
+            for(int d=0;d<3;++d) {
+                float z=((float)j+0.20f+0.30f*d)*sim::MAP_ROAD_SPACING;
+                drawBox(pv,x,0.03f,z,0.085f,0.021f,2.2f,1.0f,0.89f,0.44f);
+            }
+        }
+    }
+    for(int j=minZ;j<=maxZ;++j) {
+        float z=j*sim::MAP_ROAD_SPACING;
+        for(int i=cx-2;i<=cx+2;++i) {
+            if(i < -sim::MAP_GRID_RADIUS||i>=sim::MAP_GRID_RADIUS)continue;
+            for(int d=0;d<3;++d) {
+                float x=((float)i+0.20f+0.30f*d)*sim::MAP_ROAD_SPACING;
+                drawBox(pv,x,0.03f,z,2.2f,0.021f,0.085f,1.0f,0.89f,0.44f);
+            }
+        }
+    }
+    for(int i=minX;i<=std::min(sim::MAP_GRID_RADIUS-1,maxX);++i) {
+        for(int j=minZ;j<=std::min(sim::MAP_GRID_RADIUS-1,maxZ);++j) {
+            const sim::Box b=sim::building(i,j);
+            const int hash=(abs(i)*7+abs(j)*13+17);
+            const float h=5.0f+(hash%5)*1.4f;
+            const float green=0.58f+(hash%3)*0.05f;
+            drawBox(pv,b.x,h*0.5f,b.z,b.hx,h*0.5f,b.hz,
+                    0.58f,green,0.54f);
+            drawBox(pv,b.x,h+0.20f,b.z,b.hx+0.3f,0.25f,b.hz+0.3f,
+                    0.24f,0.26f,0.31f);
+        }
+    }
+    for(int i=0;i<sim::STOP_COUNT;++i) {
+        const sim::Stop stop=sim::stop(i);
+        if(fabsf(stop.x-focus.x)>280 || fabsf(stop.z-focus.z)>280)continue;
+        drawBox(pv,stop.x+2.4f,1.35f,stop.z,0.065f,1.35f,0.065f,
+                0.50f,0.50f,0.56f);
+        drawBox(pv,stop.x+2.4f,2.58f,stop.z,0.85f,0.27f,0.09f,
+                0.15f,0.38f,0.85f);
+        for(int p=0;p<3;++p) {
+            float x=stop.x+2.3f+(p%2)*0.75f;
+            float z=stop.z+2.8f+p;
+            drawBox(pv,x,0.86f,z,0.18f,0.58f,0.18f,0.25f,0.30f,0.72f);
+            drawBox(pv,x,1.60f,z,0.17f,0.17f,0.17f,0.95f,0.69f,0.45f);
+        }
+    }
+}
 void initGrid() {
     std::vector<float> lines;
     // 120m x 120m grid, road-like neutral ground guide.
@@ -569,6 +685,7 @@ Java_com_dx11bus_android_BusActivity_nativeInitGL(JNIEnv* env,jclass) {
     glClearColor(0.47f,0.70f,0.90f,1);
     if(models.empty())appendFallback();
     initGrid();
+    initBox();
     prepareGpu(env);
 }
 extern "C" JNIEXPORT void JNICALL
@@ -596,7 +713,8 @@ Java_com_dx11bus_android_BusActivity_nativeDraw(JNIEnv* env,jclass) {
         at={eye.x+sinf(focus.heading)*20.0f,eye.y-0.15f,eye.z+cosf(focus.heading)*20.0f};
     }
     const Mat4 pv=mul(perspective(0.95f,(float)viewportW/(float)viewportH,0.10f,800.0f),lookAt(eye,at));
-    if(gridVao) {
+    drawCity(pv,focus);
+    if(false && gridVao) {
         const Mat4 world=translate(floorf(focus.x/5.0f)*5.0f,0,
                                    floorf(focus.z/5.0f)*5.0f);
         const Mat4 gridMvp=mul(pv,world);
