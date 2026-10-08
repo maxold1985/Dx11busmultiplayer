@@ -67,6 +67,12 @@ build_mingw32\\bus_server.exe
 ```
 
 Use o mesmo caminho no cliente, ou clique em **Ler Scripts/Sons**.
+No Windows 7, voce tambem pode iniciar ambos diretamente com:
+
+```bat
+run_with_bus_mod.bat "F:\\Mods\\GV6\\[SK8 Edits] Marcopolo Paradiso GV6 1150 MB O400RSD.ini"
+```
+
 Sem a pasta de arquivos OGG/WAV originais, o audio continua sintetico.
 Consulte [docs/SCRIPTS_AUDIO.md](docs/SCRIPTS_AUDIO.md).
 
