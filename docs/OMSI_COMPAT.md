@@ -8,7 +8,7 @@
 
    `D:\Jogos\Steam\steamapps\common\OMSI 2\Vehicles\MAN_NL_NG\MAN_NL262.bus`
 
-   Esse caminho e ilustrativo: use um .bus que exista na sua instalacao. Tambem sao aceitos .ovh, model.cfg e arquivos .o3d individuais.
+   Esse caminho e ilustrativo: use um .bus que exista na sua instalacao. Tambem sao aceitos .ovh, model.cfg e arquivos .o3d ou .3ds individuais. Um .3ds com texturas exige os arquivos de imagem referenciados proximos ao modelo ou na pasta Texture do onibus.
 4. Confira a mensagem com quantidade de malhas importadas. O cliente grava detalhes em `omsi_import.log` ao lado de `bus_client.exe`.
 5. Clique **Conectar** e entre no servidor multiplayer. O mesmo modelo sera desenhado para todos os onibus deste cliente.
 
@@ -26,7 +26,8 @@ build_mingw32\bus_client.exe
 | `.bus` / `.ovh` | Lê `[model]` e localiza o `.cfg` |
 | `model.cfg` | Lê `[mesh]` em ordem, com caminho relativo |
 | `.o3d` | Leitura binaria nativa das versoes 1, 3, 4, 5 e 7 (geometria, UV, normais, triangulos, materiais e matriz de pivot) |
-| `.x` DirectX legado / `.3ds` 3D Studio | Opcional com Assimp i686 (`BUS_WITH_ASSIMP=ON`) |
+| `.3ds` 3D Studio | Leitor binario nativo C++11 (objetos, vertices, faces, UV, texturas e materiais), sem Assimp |
+| `.x` DirectX legado | Opcional com Assimp i686 (`BUS_WITH_ASSIMP=ON`) |
 | `.bmp` `.png` `.jpg` | Textura via Windows Imaging Component |
 | `.tga` | 24/32-bit true-color, sem paleta, cru ou RLE |
 | `.dds` | DXT1, DXT3 e DXT5 (BC1/2/3), com DX10 BC1/2/3, somente mip 0 |
@@ -43,10 +44,10 @@ O parser reconhece `[newanim]`, `origin_trans`, `origin_rot_x/y/z`, `origin_from
 - Nao executa scripts OMSI `.osc`, plugin DLLs, HOF/IBIS, display dinamico, sons originais ou troca de pinturas `.cti`.
 - `[matl]` especifico, alpha/reflexao por variavel, transmap e efeitos avancados nao sao reproduzidos fielmente; importacao usa materiais estaticos `.o3d`.
 - `.o3d` protegidos ou com extensoes desconhecidas podem falhar; inspecte `omsi_import.log`.
-- Geometria `.x` e `.3ds` so carregam quando Assimp esta ativo; `.o3d` nao precisa Assimp.
+- Geometria `.3ds` e `.o3d` nao precisa Assimp. Apenas `.x` exige Assimp. O importador 3DS usa as coordenadas dos vertices como exportadas; nao aplica transformacoes 0x4160 nem reproduz animacoes 3DS.
 - Algumas portas/rodas podem ficar sem animacao; toda geometria estaticamente importada segue o bus.
 - No multiplayer, cada cliente escolhe seu proprio modelo; servidor nao envia modelo/textura nem oferece sincronizacao OMSI completa.
-- Testes de parser sao sinteticos. A importacao real e o build MinGW32 em Windows 7/10 ainda precisam ser verificados com arquivos legais do usuario.
+- Testes de parser incluem um arquivo 3DS sintetico e validacao local com modelo GV1150.3ds do usuario (548 malhas, 690053 vertices, 827849 triangulos); o modelo comercial nao acompanha o repositorio. A importacao real e o build MinGW32 em Windows 7/10 ainda precisam ser verificados com arquivos legais do usuario.
 
 Documentacao publica do formato: https://github.com/openOMSI-Project/openOMSI/blob/main/docs/FORMATS.md
 Projeto openOMSI: https://github.com/openOMSI-Project/openOMSI
