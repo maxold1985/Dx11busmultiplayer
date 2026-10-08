@@ -1,0 +1,19 @@
+name: Native C++11 regression tests
+
+on:
+  push:
+    branches: [mainn]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure portable targets
+        run: cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release
+      - name: Build C++11 targets
+        run: cmake --build build-native --parallel 2
+      - name: Run all regression tests
+        run: ctest --test-dir build-native --output-on-failure
