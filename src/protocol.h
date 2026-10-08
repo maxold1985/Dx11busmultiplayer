@@ -1,5 +1,7 @@
 #pragma once
+#ifndef BUS_SIM_TEST
 #include <winsock2.h>
+#endif
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -26,6 +28,8 @@ struct NetPacket {
 };
 #pragma pack(pop)
 
+
+#ifndef BUS_SIM_TEST
 inline bool initializeSockets() { WSADATA w; return WSAStartup(MAKEWORD(2,2),&w)==0; }
 inline void closeSockets() { WSACleanup(); }
 inline void initPacket(NetPacket& p,uint32_t type) {
@@ -34,3 +38,5 @@ inline void initPacket(NetPacket& p,uint32_t type) {
 inline bool addressEqual(const sockaddr_in& a,const sockaddr_in& b) {
     return a.sin_addr.s_addr==b.sin_addr.s_addr && a.sin_port==b.sin_port;
 }
+
+#endif // BUS_SIM_TEST
