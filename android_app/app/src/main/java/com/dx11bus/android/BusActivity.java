@@ -58,6 +58,8 @@ public final class BusActivity extends Activity {
     public static native void nativeFlag(int flag);
     public static native void nativeCamera(float dx, float dy, float zoom);
     public static native void nativeCockpit();
+    public static native void nativeGlassDiagnostic();
+    public static native void nativeGlassFaces();
     public static native String nativeStatus();
     public static native void nativeSoundEvent(String event);
     public static native void nativePause();
@@ -175,6 +177,8 @@ public final class BusActivity extends Activity {
         addAction(actions,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
         addAction(actions,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
         addAction(actions,"ZOOM -",() -> surface.queueEvent(() -> nativeZoom(2.0f)));
+        addAction(actions,"VIDRO COR",() -> surface.queueEvent(BusActivity::nativeGlassDiagnostic));
+        addAction(actions,"VIDRO FACES",() -> surface.queueEvent(BusActivity::nativeGlassFaces));
         addAction(actions,"RESET",() -> surface.queueEvent(() -> nativeFlag(16)));
         tools.addView(actions);
         top.addView(tools);
@@ -359,6 +363,14 @@ public final class BusActivity extends Activity {
             case KeyEvent.KEYCODE_B:
                 if(event.getRepeatCount()==0)
                     surface.queueEvent(() -> nativeSoundEvent("stopRequest"));
+                return true;
+            case KeyEvent.KEYCODE_F6:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(BusActivity::nativeGlassDiagnostic);
+                return true;
+            case KeyEvent.KEYCODE_F7:
+                if(event.getRepeatCount()==0)
+                    surface.queueEvent(BusActivity::nativeGlassFaces);
                 return true;
             case KeyEvent.KEYCODE_F1:
                 if(event.getRepeatCount()==0)
