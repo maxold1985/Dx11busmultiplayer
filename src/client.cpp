@@ -74,6 +74,8 @@ static MotorAudio motor;
 static BusSoundPlayer importedBusAudio;
 static bool importedAudioReady = false;
 static float localThrottle = 0.0f;
+static bool previousBrakeSound = false;
+static int previousAudioGear = 0;
 struct Snapshot {
     BusState buses[MAX_BUSES];
     uint32_t count;
@@ -610,6 +612,13 @@ static void drawFrame(){
         drawBus(currentBus(latest.buses[i].id,alpha),latest.buses[i].id==myId);
     }
     if(importedAudioReady && importedBusAudio.playing()) {
+		const bool brakingNow=(GetAsyncKeyState(VK_SPACE)&0x8000)!=0;
+		if(brakingNow && !previousBrakeSound)importedBusAudio.trigger("brakePedal");
+		previousBrakeSound=brakingNow;
+		if(previousAudioGear!=0 && previousAudioGear!=focus.gear) {
+			importedBusAudio.trigger("gearShift");
+		}
+		previousAudioGear=focus.gear;
         importedBusAudio.update(
             focus.rpm,
             focus.gear,
@@ -1035,6 +1044,18 @@ static LRESULT CALLBACK windowProcedure(
 		if(w == VK_ESCAPE) {
 			DestroyWindow(hwnd);
 			return 0;
+		}
+
+		// One-shot sound events declared by name in Motor.txt.
+		if(firstKeyDown && importedAudioReady) {
+			if(w == 'H')importedBusAudio.trigger("horn");
+			if(w == 'B')importedBusAudio.trigger("stopRequest");
+			if(w == 'P')importedBusAudio.trigger("parkingBrakeOn");
+			if(w == 'O')importedBusAudio.trigger("parkingBrakeOff");
+			if(w == 'I')importedBusAudio.trigger("blinkers");
+			if(w == 'K')importedBusAudio.trigger("rightDoor1Open");
+			if(w == 'L')importedBusAudio.trigger("rightDoor1Close");
+			if(w == 'N')importedBusAudio.trigger("reverse");
 		}
 
 		if(w == VK_F6 && firstKeyDown) {
