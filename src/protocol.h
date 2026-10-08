@@ -13,7 +13,8 @@ static const int MAX_PLAYERS = 16;
 static const int AI_BUSES = 4;
 static const int MAX_BUSES = MAX_PLAYERS + AI_BUSES;
 
-// BUS4 replicates steering and transmission mode to every client.
+// BUS4 replicates steering, transmission and clutch to every client.
+// Passenger and stop indices are 16-bit to keep 20 buses below the 1400-byte UDP limit.
 // Rebuild the server and every client together before connecting.
 static const uint32_t BUS_MAGIC = 0x42555334;
 
@@ -62,8 +63,8 @@ struct BusState {
 
 	int32_t gear;
 
-	uint32_t passengers;
-	uint32_t nextStop;
+	uint16_t passengers;
+	uint16_t nextStop;
 	uint32_t steeringMode;
 	uint32_t transmissionMode;
 	float clutch;
