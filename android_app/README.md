@@ -1,52 +1,114 @@
-# DX11BusAndroid (Android Studio + NDK)
+# DX11BusAndroid — OpenGL ES 3.0, Android Studio e NDK
 
-Aplicativo gráfico Android baseado em OpenGL ES 3.0. É adicional:
-nenhum arquivo do cliente ou servidor DirectX 11 do Windows foi substituído.
+Este aplicativo **acrescenta** um cliente gráfico Android ao projeto original.
+Os executáveis DirectX 11 do Windows (`src/client.cpp` e `src/server.cpp`)
+não foram substituídos. O Android mantém o protocolo multiplayer BUS4
+(porta UDP 27015) e compartilha os leitores de modelos e scripts OMSI.
 
-## Compilar
+## Gerar e instalar o APK
 
-Abra a pasta **android_app** no Android Studio. Instale **Android SDK 35**,
-**Android NDK**, **CMake 3.22.1** e use **JDK 17**.
-Se o Android Studio solicitar um Gradle Wrapper ausente, execute
-**gradle wrapper --gradle-version 8.7** na pasta android_app com Gradle
-instalado, ou configure uma distribuição local do Gradle 8.7.
-Execute **Build > Build APK(s)**. O projeto usa ABI arm64-v8a
-(API 26 ou superior). Java Activity e biblioteca JNI são incluídos no APK.
+1. Abra a pasta `android_app/` no Android Studio.
+2. Instale **JDK 17**, **Android SDK 35**, **NDK 27.2.12479018**
+   e **CMake 3.22.1**.
+3. Configure **Gradle 8.7**; se não existir o Gradle Wrapper, use a
+   distribuição local do Gradle ou execute
+   `gradle wrapper --gradle-version 8.7` nesta pasta.
+4. Selecione **Build > Build APK(s)**, variante `debug`.
+5. O arquivo de saída é `app/build/outputs/apk/debug/app-debug.apk`.
+6. Instale o APK em dispositivo Android **arm64-v8a**, API 26 ou superior.
+   A visualização requer GPU com OpenGL ES 3.0.
 
-A versão de console no diretório raiz (build_ndk.bat) continua disponível separadamente.
+Também existe o workflow
+[Android APK](../.github/workflows/android-apk.yml) do GitHub Actions:
+após uma execução bem-sucedida, baixe o artefato
+`DX11BusAndroid-debug-arm64`. Esse é um caminho alternativo caso você
+não tenha Gradle instalado no Windows.
 
-## Controles
+O script `build_ndk.bat` **na raiz** continua produzindo as bibliotecas
+e binários Android de terminal. **Não gera o APK gráfico.**
 
-- **MODELO**: escolha um arquivo .o3d, .3ds, model.cfg ou .bus.
-- **SCRIPT**: escolha .ini ou Cambio_A/M.txt (parser de scripts, sem execução de .osc).
-- **PASTA OMSI**: escolha a pasta completa do mod usando seletor de diretórios;
-  o aplicativo copia os arquivos para o armazenamento privado, preservando a
-  hierarquia de pastas relativa, incluindo malhas, configurações e texturas.
-  A seleção automática privilegia .bus, model.cfg, .3ds e .o3d.
-- **CONECTAR**: informe o IPv4 do servidor Windows/Android BUS4 na porta UDP 27015.
-- **CAMERA**: alterna entre câmera externa e cabine.
-- **RESET / PORTA / MARCHA / AUTO / DIRECAO OMSI**: enviam flags BUS4.
-- **ACELERAR / RE / ESQUERDA / DIREITA / FREIO / EMBREAGEM**:
-  mantenha os botões pressionados.
-- Arraste sobre a imagem para orbitar a câmera.
+## Controles Android
 
-## Estado da compatibilidade
+- **PASTA OMSI**: escolha a pasta completa do ônibus usando o seletor do Android.
+  O aplicativo copia os arquivos para armazenamento privado preservando
+  as subpastas de malhas, scripts, sons e texturas.
+- **MODELO** e **SCRIPT**: escolhem arquivo isolado. Para arquivos que
+  referenciam outros, use a importação da pasta inteira.
+- **MODELOS MOD** e **SCRIPTS MOD**: permitem escolher uma variante dentre
+  os arquivos já copiados, sem perder os caminhos relativos do mod.
+- **CONECTAR**: informe o IPv4 do servidor Windows ou Android na porta 27015.
+  O endereço fica salvo para a próxima utilização.
+- **CAMERA**: alterna câmera externa/cabine. Arraste na tela para
+  orbitar, faça pinça para zoom ou pressione ZOOM + / ZOOM -.
+- **ACELERAR, RE, ESQUERDA, DIREITA, FREIO, EMBREAGEM**:
+  mantenha o botão pressionado.
+- **PORTA, MARCHA +, MARCHA -, AUTO, DIRECAO OMSI, RESET**:
+  enviam comandos pelo protocolo BUS4.
+- **BUZINA, PARADA, SETA e FREIO MAO**:
+  acionam os efeitos sonoros disponíveis nos scripts do ônibus.
 
-Implementado: janela 3D real (GLSurfaceView + GLES 3.0), shader,
-profundidade, alpha blending de vidros, DDS (DXT1/DXT3/DXT5 e RGBA32),
-carregamento de .o3d e .3ds,
-câmera, posição dos ônibus e veículos IA recebida por UDP,
-texturas PNG/JPG/BMP decodificáveis pelo Android, seleção de arquivos
-via Storage Access Framework e parser de scripts OMSI.
+Teclado físico: W/S acelerador/ré, A/D direção, Espaço freio,
+Tab embreagem, E portas, Q/Z marchas, G automático, R reset,
+H buzina, B pedido de parada e F1 câmera.
 
-A versão Android reproduz o mapa procedural do cliente Windows com ruas,
-prédios, paradas e passageiros, dentro de um raio menor para desempenho móvel.
-Animações básicas de model.cfg (portas/direção) e rodas nomeadas em 3DS
-foram portadas. Formatos .x, GLB/FBX, áudio e scriptagem executável .osc
-ainda não são suportados no renderizador Android.
-O script carregado no cliente é lido para consulta/configuração, mas a física
-multiplayer continua autoritativa no servidor: para alterar câmbio,
-importe o script também no servidor Windows, via DX11BUS_MOD_CONFIG.
+Sem servidor, o aplicativo executa uma **simulação local offline** com
+a física compartilhada. Quando conectado, o servidor é autoritativo:
+o cliente apenas envia controles e renderiza os snapshots recebidos.
 
-Sem build/teste executado em Android Studio/NDK neste ambiente. Envie erros
-de Gradle/CMake/Clang ou imagem da tela para aprimorarmos o port.
+## Compatibilidade de modelos
+
+O build padrão, sem bibliotecas grandes, suporta:
+- OMSI `.o3d`, `.3ds`, `model.cfg` e `.bus`, incluindo as malhas
+  referenciadas por arquivos de configuração;
+- Texturas PNG/JPG/BMP via BitmapFactory e DDS DXT1/DXT3/DXT5 e RGBA32;
+- Profundidade, blending de vidros e animações básicas de portas/rodas.
+
+### Habilitar importação Assimp (.x, .glb, .gltf, .fbx, .obj)
+
+O importador Assimp é **opcional** e fica desativado por padrão.
+Para habilitar, rode na pasta `android_app`:
+
+```bat
+gradle :app:assembleDebug -PbusAndroidAssimp=true
+```
+
+Isso ativa o download e a compilação do Assimp 5.4.3 pelo CMake.
+Precisa de conexão à internet, utiliza mais RAM, leva mais tempo
+e **ainda não foi validado em compilação Android real**.
+Arquivos GLB com imagens PNG/JPEG incorporadas são extraídos
+para a pasta privada do modelo. Importações mais complexas podem
+exigir ajuste de materiais e animações.
+
+## Cenário e áudio
+
+O cenário procedural do Windows foi portado para OpenGL ES:
+ruas, quadras, prédios, faixas e paradas com passageiros.
+O raio de visibilidade móvel é reduzido para desempenho;
+a visualização é limitada a cerca de 30 quadros por segundo.
+
+O áudio Android utiliza **AAudio** (API 26+) com `stb_vorbis`:
+- camadas OGG Vorbis e WAV PCM16 de motor com RPM/pitch/volume;
+- sons nomeados de portas, buzina, freio e câmbio;
+- síntese de motor diesel quando faltam arquivos de áudio.
+
+A leitura de `Motor.txt` e `Cambio_A/M.txt` reutiliza
+o parser de scripts OMSI, sem executar scripts `.osc`.
+Em multiplayer, **configuração de transmissão/câmbio do cliente não
+substitui a configuração do servidor**; configure o servidor
+com `DX11BUS_MOD_CONFIG` para efetivar o câmbio personalizado.
+
+## Estado de validação e diagnóstico
+
+Arquivos e configurações estão implementados no repositório, mas
+**não houve compilação, instalação ou teste de execução real neste ambiente**.
+O funcionamento do APK, principalmente Assimp e áudio, precisa
+ser confirmado no Android Studio/dispositivo.
+
+Para erros de execução use:
+
+```bat
+adb logcat -s Dx11BusAndroid
+```
+
+Para erros de build, copie a primeira mensagem `error:` do Clang
+ou a seção `FAILURE: Build failed` do Gradle.
