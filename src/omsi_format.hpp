@@ -228,7 +228,7 @@ inline std::string nextParam(const std::vector<std::string>& lines,size_t& i) {
 inline float parseFloat(const std::string& s,float fallback=0) {
     if(s.empty())return fallback;
     char* end=0;const float f=strtof(s.c_str(),&end);
-    if(end==s.c_str()||!isfinite(f))return fallback;
+    if(end==s.c_str()||!std::isfinite(f))return fallback;
     return f;
 }
 inline bool readModelList(const std::string& input,std::vector<MeshEntry>& entries,std::string* error=0) {
