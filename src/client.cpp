@@ -18,7 +18,6 @@
 #include <d3d11.h>
 #include <stdio.h>
 #include <vector>
-#include <algorithm>
 #include <string>
 #include <math.h>
 #include <algorithm>
