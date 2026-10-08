@@ -317,7 +317,7 @@ static void drawFrame(){
         if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
             sprintf(title,"DX11 Bus | Sem resposta do servidor ha mais de 3 segundos");
         else if(latest.count>0)
-            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera E porta Q/Z marcha",
+            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera E porta Q/Z manual G auto",
                myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
                (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count);
         else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
@@ -337,6 +337,7 @@ static void sendControls() {
         if(GetAsyncKeyState('E')&0x8000)packet.flags|=INPUT_TOGGLE_DOOR;
         if(GetAsyncKeyState('Q')&0x8000)packet.flags|=INPUT_GEAR_UP;
         if(GetAsyncKeyState('Z')&0x8000)packet.flags|=INPUT_GEAR_DOWN;
+        if(GetAsyncKeyState('G')&0x8000)packet.flags|=INPUT_AUTO_GEAR;
     }
     sendto(socketUdp,(char*)&packet,sizeof(packet),0,(sockaddr*)&serverAddress,sizeof(serverAddress));
 }
