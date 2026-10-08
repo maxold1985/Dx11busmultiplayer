@@ -95,6 +95,7 @@ inline float visualTravel(const BusState& b,int i) {
 }
 inline void suspension(Dynamics& d,float dt) {
     float force=-10000.0f*9.81f;
+    // Chassi nivelado em piso plano: rigidez e amortecimento equilibrados por eixo.
     float pitchTorque=0,rollTorque=0;
     for(int i=0;i<6;i++) {
         float lx=wheelOffsetX(i),lz=wheelOffsetZ(i);
@@ -111,13 +112,13 @@ inline void suspension(Dynamics& d,float dt) {
         }
         d.wheelTravel[i]=compression;
         force+=spring;
-        pitchTorque-=spring*lz;
-        rollTorque+=spring*lx;
+        pitchTorque+=spring*lz;
+        rollTorque-=spring*lx;
     }
     d.verticalSpeed=clamp(d.verticalSpeed+force/10000.0f*dt,-15,15);
     d.b.y+=d.verticalSpeed*dt;
-    d.pitchSpeed+=(pitchTorque/150000.0f-d.b.pitch*7.0f-d.pitchSpeed*4.0f)*dt;
-    d.rollSpeed+=(rollTorque/65000.0f-d.b.roll*7.0f-d.rollSpeed*4.0f)*dt;
+    d.pitchSpeed+=(pitchTorque/240000.0f-d.b.pitch*12.0f-d.pitchSpeed*8.0f)*dt;
+    d.rollSpeed+=(rollTorque/130000.0f-d.b.roll*14.0f-d.rollSpeed*9.0f)*dt;
     d.b.pitch=clamp(d.b.pitch+d.pitchSpeed*dt,-0.20f,0.20f);
     d.b.roll=clamp(d.b.roll+d.rollSpeed*dt,-0.20f,0.20f);
     if(d.b.y<0.85f) {d.b.y=0.85f;d.verticalSpeed=std::max(0.0f,d.verticalSpeed);}
