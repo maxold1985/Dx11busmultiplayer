@@ -339,6 +339,7 @@ public:
 
 		int missing = 0;
 		int failed = 0;
+		int skipped = 0;
 		std::string details;
 
 		for(size_t i = 0; i < scripts.sounds.size(); ++i) {
@@ -352,7 +353,8 @@ public:
 			// Later [soundN] entries often represent doors, buttons, horns,
 			// and other events and must not loop continuously.
 			const int number = atoi(sound.section.c_str() + 5);
-			if(number < 1 || number > 10) {
+			if(number < 1 || number > 18) {
+				++skipped;
 				continue;
 			}
 			// Retarder, brake, differential, gear-shift and other event
@@ -365,6 +367,7 @@ public:
 				soundName.find("pegando")!=std::string::npos ||
 				soundName.find("partida")!=std::string::npos ||
 				soundName.find("retarder")!=std::string::npos) {
+				++skipped;
 				continue;
 			}
 
@@ -377,6 +380,7 @@ public:
 				if(sectionNumber >= 1 && sectionNumber <= 3) {
 					activeSound.volumeMultiplier = 0.45f;
 				} else {
+					++skipped;
 					continue;
 				}
 			}
@@ -409,11 +413,12 @@ public:
 		sprintf(
 			message,
 			"Engine layers decoded: %u / %u; missing files: %d; "
-			"unsupported/corrupt: %d. WAV PCM and OGG Vorbis supported.",
+			"unsupported/corrupt: %d; skipped non-engine: %d. WAV PCM and OGG Vorbis supported.",
 			(unsigned)tracks.size(),
 			(unsigned)scripts.sounds.size(),
 			missing,
-			failed
+			failed,
+			skipped
 		);
 
 		reportMessage = message;
