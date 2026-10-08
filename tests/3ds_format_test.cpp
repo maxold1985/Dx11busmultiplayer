@@ -36,6 +36,7 @@ int main(){
     assert(meshes.size()==1);
     const omsi::Mesh& m=meshes[0];
     assert(m.vertices.size()==3&&m.triangles.size()==1);
+    assert(m.objectName=="Body");
     assert(m.vertices[0].x==1.f&&m.vertices[0].y==3.f&&m.vertices[0].z==2.f);
     assert(fabs(m.vertices[0].v-0.25f)<0.0001f);
     assert(m.triangles[0].a==0&&m.triangles[0].b==2&&m.triangles[0].c==1);
@@ -47,6 +48,34 @@ int main(){
     assert(!omsi::parse3DS(input,meshes,&error));
     input=fixture();input.resize(input.size()-5);
     assert(!omsi::parse3DS(input,meshes,&error));
+    // The real OMSI export uses these six distinct wheel-name families.
+    const char* wheelNames[6]={"_wheel_fl_ref004__nolight_",
+        "_wheel_fr_ref004__nolight_","_wheel_rl2_ref004__nolight_",
+        "_wheel_rr2_ref004__nolight_","_wheel_rl_ref004__nolight_",
+        "_wheel_rr_ref004__nolight_"};
+    std::vector<omsi::Mesh> wheelParts;
+    for(int i=0;i<6;i++){
+        assert(omsi::wheelGroup3DS(wheelNames[i])==i);
+        omsi::Mesh wheel;
+        wheel.objectName=wheelNames[i];
+        omsi::Vertex v0={},v1={};
+        v0.x=(i&1)?1.0f:-1.0f;v1.x=v0.x;
+        v0.y=0.16f;v1.y=1.24f;
+        v0.z=(i<2?3.82f:(i<4?-2.63f:-4.08f))-0.54f;
+        v1.z=v0.z+1.08f;
+        wheel.vertices.push_back(v0);
+        wheel.vertices.push_back(v1);
+        wheelParts.push_back(wheel);
+    }
+    assert(omsi::wheelGroup3DS("_steering_wheel_")==-1);
+    assert(omsi::wheelGroup3DS("_wheel_suspension_rl_")==-1);
+    omsi::WheelPivot3DS pivots[6];
+    omsi::find3DSWheelPivots(wheelParts,pivots);
+    for(int i=0;i<6;i++){
+        assert(pivots[i].valid);
+        assert(fabsf(pivots[i].y-0.7f)<0.001f);
+        assert(fabsf(pivots[i].radius-0.54f)<0.001f);
+    }
     puts("native 3ds format tests passed");
     return 0;
 }
