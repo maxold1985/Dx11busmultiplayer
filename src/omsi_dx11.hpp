@@ -225,18 +225,26 @@ inline bool upload(ID3D11Device* device,Bus& bus,const Mesh& mesh,
             part.center[axis]*=invCount;
         }
         memcpy(part.rgba,mesh.materials[material].rgba,sizeof(part.rgba));
-        // Glass in many OMSI/3DS mods has opaque diffuse alpha despite
-        // being a window. Identify it from material texture names.
+        // Preserve transparent OMSI materials even when the texture name does
+        // not contain "glass" or "window". Opaque textures may still use
+        // cutout alpha, which is handled by the pixel shader's clip().
         std::string glassName=mesh.materials[material].texture;
         for(size_t k=0;k<glassName.size();++k) {
             glassName[k]=(char)std::tolower((unsigned char)glassName[k]);
         }
-        part.transparent=
+        const bool namedGlass=
             glassName.find("glass")!=std::string::npos ||
             glassName.find("vidro")!=std::string::npos ||
             glassName.find("window")!=std::string::npos ||
             glassName.find("janela")!=std::string::npos;
-        part.rgba[3]=part.transparent ? 0.30f : 1.0f;
+        const float materialAlpha=part.rgba[3];
+        const bool alphaGlass=materialAlpha>0.025f && materialAlpha<0.995f;
+        part.transparent=namedGlass || alphaGlass;
+        if(namedGlass && materialAlpha>=0.995f) {
+            part.rgba[3]=0.30f;
+        }
+        // Do not force non-glass materials to alpha=1: it loses
+        // author-supplied transparency and can obscure the cabin.
         part.texture=findTexture(device,bus,filename,mesh.materials[material].texture);
         gpu.parts.push_back(part);
     }
