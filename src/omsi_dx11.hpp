@@ -1,6 +1,7 @@
 #pragma once
 // Adaptador OMSI -> Direct3D 11, sem Assimp. So modelos locais fornecidos pelo usuario.
 #include "omsi_format.hpp"
+#include "simulation.hpp"
 #include "model_assimp.hpp"
 #include "math_compat.h"
 #include <map>
@@ -293,8 +294,15 @@ inline bool load(ID3D11Device* device,const std::string& path,Bus& bus) {
 inline float variableValue(const std::string& variable,const BusState& state) {
     const std::string v=lower(variable);
     if(v.find("wheel_rotation_")==0)return state.wheelRotation;
-    if(v.find("axle_steering_")==0)return state.steer*0.47f;
-    if(v.find("axle_suspension_")==0)return 0;
+    if(v.find("axle_steering_")==0)return (v.find("axle_steering_0_")==0)?state.steer*0.47f:0;
+    if(v.find("axle_suspension_")==0){
+        unsigned axle=0;char side='L';
+        if(sscanf(v.c_str(),"axle_suspension_%u_%c",&axle,&side)==2 && axle<3){
+            const int wheel=(int)axle*2+(side=='r'?1:0);
+            return sim::visualTravel(state,wheel)-0.50f;
+        }
+        return 0;
+    }
     if(v.find("door_")==0)return state.door;
     if(v.find("cp_lenkrad")==0||v.find("steering")==0)return state.steer;
     return 0;
