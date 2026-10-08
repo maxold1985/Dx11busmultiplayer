@@ -20,12 +20,24 @@ int main() {
         closesocket(sock);closeSockets();return 1;
     }
     u_long nonBlocking=1;ioctlsocket(sock,FIONBIO,&nonBlocking);
-    Player players[MAX_BUSES];
+    Player players[MAX_PLAYERS];
+    struct Traffic {sim::Dynamics physics;int waypoint;};
+    Traffic traffic[AI_BUSES];
+    const float route[4][2]={{3.0f,3.0f},{3.0f,57.0f},{57.0f,57.0f},{57.0f,3.0f}};
+    for(int i=0;i<AI_BUSES;i++) {
+        traffic[i].physics.b.id=0x80000000u+(uint32_t)i;
+        traffic[i].physics.b.x=route[i][0];
+        traffic[i].physics.b.z=route[i][1];
+        traffic[i].waypoint=(i+1)%4;
+        traffic[i].physics.b.heading=atan2f(
+            route[traffic[i].waypoint][0]-route[i][0],
+            route[traffic[i].waypoint][1]-route[i][1]);
+    }
     uint32_t nextId=1,tick=0;
     LARGE_INTEGER frequency,previous,now;
     QueryPerformanceFrequency(&frequency);QueryPerformanceCounter(&previous);
     double accumulator=0,sendAccumulator=0;
-    printf("DX11 Bus servidor autoritativo: UDP %u, %d jogadores\n",BUS_PORT,MAX_BUSES);
+    printf("DX11 Bus servidor autoritativo: UDP %u, %d jogadores\n",BUS_PORT,MAX_PLAYERS);
     for(;;) {
         NetPacket packet;
         sockaddr_in from={};int fromSize=sizeof(from);
@@ -35,9 +47,9 @@ int main() {
                 fromSize=sizeof(from);continue;
             }
             int index=-1;
-            for(int i=0;i<MAX_BUSES;i++) if(players[i].active && addressEqual(players[i].address,from)) {index=i;break;}
+            for(int i=0;i<MAX_PLAYERS;i++) if(players[i].active && addressEqual(players[i].address,from)) {index=i;break;}
             if(index<0) {
-                for(int i=0;i<MAX_BUSES;i++)if(!players[i].active){index=i;break;}
+                for(int i=0;i<MAX_PLAYERS;i++)if(!players[i].active){index=i;break;}
                 if(index<0){fromSize=sizeof(from);continue;}
                 players[index]=Player();
                 players[index].active=true;
@@ -58,7 +70,7 @@ int main() {
         if(elapsed>0.2)elapsed=0.2;
         accumulator+=elapsed;sendAccumulator+=elapsed;
         while(accumulator>=1.0/60.0) {
-            for(int i=0;i<MAX_BUSES;i++) {
+            for(int i=0;i<MAX_PLAYERS;i++) {
                 if(!players[i].active)continue;
                 Player& p=players[i];
                 if((DWORD)(GetTickCount()-p.lastSeen)>5000) {
@@ -67,10 +79,33 @@ int main() {
                 }
                 sim::step(p.physics,1.0f/60.0f);
             }
-            for(int i=0;i<MAX_BUSES;i++)if(players[i].active) {
-                for(int j=i+1;j<MAX_BUSES;j++)if(players[j].active)
+            for(int i=0;i<AI_BUSES;i++) {
+                Traffic& ai=traffic[i];
+                float dx=route[ai.waypoint][0]-ai.physics.b.x;
+                float dz=route[ai.waypoint][1]-ai.physics.b.z;
+                float distance=sqrtf(dx*dx+dz*dz);
+                if(distance<6.0f) {
+                    ai.waypoint=(ai.waypoint+1)%4;
+                    dx=route[ai.waypoint][0]-ai.physics.b.x;
+                    dz=route[ai.waypoint][1]-ai.physics.b.z;
+                    distance=sqrtf(dx*dx+dz*dz);
+                }
+                float desired=atan2f(dx,dz);
+                float difference=atan2f(sinf(desired-ai.physics.b.heading),
+                                        cosf(desired-ai.physics.b.heading));
+                float steering=sim::clamp(difference*1.7f,-1.0f,1.0f);
+                float desiredSpeed=distance<17.0f?3.0f:7.0f;
+                float accel=ai.physics.b.speed<desiredSpeed?0.55f:0.0f;
+                float braking=ai.physics.b.speed>desiredSpeed?0.7f:0.0f;
+                sim::input(ai.physics,accel,steering,braking,0);
+                sim::step(ai.physics,1.0f/60.0f);
+            }
+            for(int i=0;i<MAX_PLAYERS;i++)if(players[i].active) {
+                for(int j=i+1;j<MAX_PLAYERS;j++)if(players[j].active)
                     sim::separate(players[i].physics,players[j].physics);
             }
+            for(int i=0;i<AI_BUSES;i++)for(int j=0;j<MAX_PLAYERS;j++)
+                if(players[j].active)sim::separate(traffic[i].physics,players[j].physics);
             ++tick;
             accumulator-=1.0/60.0;
         }
@@ -79,9 +114,11 @@ int main() {
             NetPacket response;
             initPacket(response,PACKET_WORLD);
             response.tick=tick;
-            for(int i=0;i<MAX_BUSES;i++)if(players[i].active)
+            for(int i=0;i<MAX_PLAYERS;i++)if(players[i].active)
                 response.buses[response.count++]=players[i].physics.b;
-            for(int i=0;i<MAX_BUSES;i++)if(players[i].active) {
+            for(int i=0;i<AI_BUSES;i++)
+                response.buses[response.count++]=traffic[i].physics.b;
+            for(int i=0;i<MAX_PLAYERS;i++)if(players[i].active) {
                 response.clientId=players[i].physics.b.id;
                 sendto(sock,(const char*)&response,sizeof(response),0,
                        (sockaddr*)&players[i].address,sizeof(players[i].address));
