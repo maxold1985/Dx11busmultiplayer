@@ -1,11 +1,6 @@
 name: Android APK (OpenGL ES 3)
+# Build on demand so large NDK builds do not consume Actions minutes per commit.
 on:
-  push:
-    branches: [mainn]
-    paths:
-      - 'android_app/**'
-      - 'src/**'
-      - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
 jobs:
