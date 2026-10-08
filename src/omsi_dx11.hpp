@@ -321,11 +321,12 @@ inline DirectX::XMMATRIX animationTransform(const GpuMesh& mesh,const BusState& 
         const float x=anim.fromMesh?mesh.pivot[12]:anim.origin[0];
         const float y=anim.fromMesh?mesh.pivot[13]:anim.origin[2];
         const float z=anim.fromMesh?mesh.pivot[14]:anim.origin[1];
+        // model.cfg tem X direita, Y frente, Z cima; O3D/D3D tem X direita, Y cima, Z frente.
         XMMATRIX basis=XMMatrixRotationX(anim.rot[0]*toRad)*
-                        XMMatrixRotationY(anim.rot[1]*toRad)*
-                        XMMatrixRotationZ(anim.rot[2]*toRad);
-        XMMATRIX inverse=XMMatrixRotationZ(-anim.rot[2]*toRad)*
-                          XMMatrixRotationY(-anim.rot[1]*toRad)*
+                        XMMatrixRotationZ(anim.rot[1]*toRad)*
+                        XMMatrixRotationY(anim.rot[2]*toRad);
+        XMMATRIX inverse=XMMatrixRotationY(-anim.rot[2]*toRad)*
+                          XMMatrixRotationZ(-anim.rot[1]*toRad)*
                           XMMatrixRotationX(-anim.rot[0]*toRad);
         XMMATRIX motion=anim.translation?XMMatrixTranslation(value,0,0):XMMatrixRotationX(value*toRad);
         result=result*(XMMatrixTranslation(-x,-y,-z)*inverse*motion*basis*XMMatrixTranslation(x,y,z));
