@@ -16,6 +16,7 @@
 #include "3ds_format.hpp"
 #include "bus_script.hpp"
 #include "simulation.hpp"
+#include "android_audio.hpp"
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,"Dx11BusAndroid",__VA_ARGS__)
 
@@ -122,6 +123,9 @@ std::string modelStatus="Modelo padrao",scriptStatus="Nenhum script",networkStat
 std::string modelRoot;
 bool imported=false;
 buscfg::ModScripts scripts;
+AndroidBusAudio audio;
+int previousAudioGear=0;
+bool previousAudioBrake=false;
 
 const char* vsCode=
     "#version 300 es\n"
@@ -846,6 +850,7 @@ Java_com_dx11bus_android_BusActivity_nativeInitGL(JNIEnv* env,jclass) {
     initGrid();
     initBox();
     prepareGpu(env);
+    audio.start();
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeResize(JNIEnv*,jclass,jint w,jint h) {
@@ -862,6 +867,11 @@ Java_com_dx11bus_android_BusActivity_nativeDraw(JNIEnv* env,jclass) {
     glUseProgram(program);
     prepareGpu(env);
     const BusState focus=focusBus();
+    audio.update(focus.rpm>0?focus.rpm:700.0f,throttle,focus.speed,focus.gear,cockpit);
+    if(gotSnapshot && previousAudioGear!=0 && focus.gear!=previousAudioGear)audio.trigger("gearShift");
+    previousAudioGear=focus.gear;
+    if(brake>0.1f && !previousAudioBrake)audio.trigger("brakePedal");
+    previousAudioBrake=brake>0.1f;
     const float yaw=focus.heading+orbitYaw;
     V3 eye={focus.x-sinf(yaw)*orbitDistance*cosf(orbitPitch),
         focus.y+1.0f+orbitDistance*sinf(orbitPitch),
@@ -906,7 +916,9 @@ Java_com_dx11bus_android_BusActivity_nativeLoadModel(JNIEnv* env,jclass,jstring 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_dx11bus_android_BusActivity_nativeLoadScript(JNIEnv* env,jclass,jstring file) {
     if(scripts.load(fromJava(env,file))) {
-        scriptStatus=scripts.diagnostic;
+        const bool samplesLoaded=audio.load(scripts);
+        audio.start();
+        scriptStatus=scripts.diagnostic+" | "+audio.report();
         return JNI_TRUE;
     }
     scriptStatus="Script nao carregado: "+scripts.diagnostic;
@@ -923,6 +935,12 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeFlag(JNIEnv*,jclass,jint flag) {
     pendingFlags|=(uint32_t)flag;
     flagUntil=androidnet::millis()+300;
+    if((flag&INPUT_TOGGLE_DOOR)!=0) {
+        const BusState bus=focusBus();
+        audio.trigger(bus.door>0.5f?"rightDoor1Close":"rightDoor1Open");
+    }
+    if((flag&(INPUT_GEAR_UP|INPUT_GEAR_DOWN|INPUT_AUTO_GEAR))!=0)
+        audio.trigger("gearShift");
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeCamera(JNIEnv*,jclass,jfloat dx,jfloat dy,jfloat zoom) {
@@ -933,6 +951,22 @@ Java_com_dx11bus_android_BusActivity_nativeCamera(JNIEnv*,jclass,jfloat dx,jfloa
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeCockpit(JNIEnv*,jclass) {
     cockpit=!cockpit;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeSoundEvent(JNIEnv* env,jclass,jstring eventName) {
+    audio.trigger(fromJava(env,eventName));
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativePause(JNIEnv*,jclass) {
+    audio.stop();
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeResume(JNIEnv*,jclass) {
+    audio.start();
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeZoom(JNIEnv*,jclass,jfloat z) {
+    orbitDistance=std::max(3.0f,std::min(80.0f,orbitDistance+(float)z));
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_dx11bus_android_BusActivity_nativeStatus(JNIEnv* env,jclass) {
