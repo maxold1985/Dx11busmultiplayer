@@ -25,6 +25,12 @@ class MotorAudio {
 public:
     MotorAudio():output(0),phase(0),currentRpm(700) {memset(headers,0,sizeof(headers));}
     bool start() {
+        // Reimporting a mod without playable files must not open
+        // another waveOut device over the existing fallback engine.
+        if(output) {
+            return true;
+        }
+
         WAVEFORMATEX format={};format.wFormatTag=WAVE_FORMAT_PCM;format.nChannels=1;
         format.nSamplesPerSec=RATE;format.wBitsPerSample=16;
         format.nBlockAlign=2;format.nAvgBytesPerSec=RATE*2;
