@@ -9,6 +9,7 @@
 #include "simulation.hpp"
 #include "math_compat.h"
 #include "audio_motor.hpp"
+#include "bus_sound.hpp"
 #include "model_assimp.hpp"
 #include "omsi_dx11.hpp"
 #include <commdlg.h>
@@ -31,6 +32,7 @@ static HWND connectButton = 0;
 static HWND omsiButton = 0;
 static HWND resetButton = 0;
 static HWND omsiSteeringButton = 0;
+static HWND scriptButton = 0;
 
 static bool resetRequested = false;
 static DWORD resetRequestedAt = 0;
@@ -66,6 +68,9 @@ static float orbitYaw=0.0f,orbitPitch=0.38f,orbitDistance=16.0f;
 static bool orbitDragging=false;
 static POINT orbitLast={0,0};
 static MotorAudio motor;
+static BusSoundPlayer importedBusAudio;
+static bool importedAudioReady = false;
+static float localThrottle = 0.0f;
 struct Snapshot {
     BusState buses[MAX_BUSES];
     uint32_t count;
@@ -190,6 +195,7 @@ static bool initializeGraphics(HWND hwnd) {
     return true;
 }
 static void shutdownGraphics(){
+    importedBusAudio.stop();
     motor.stop();
     if(context)context->ClearState();
     busModel.clear();
@@ -532,7 +538,17 @@ static void drawFrame(){
         if(cockpit && latest.buses[i].id==myId)continue;
         drawBus(currentBus(latest.buses[i].id,alpha),latest.buses[i].id==myId);
     }
-    motor.update(focus.rpm);
+    if(importedAudioReady && importedBusAudio.playing()) {
+        importedBusAudio.update(
+            focus.rpm,
+            focus.gear,
+            localThrottle,
+            focus.speed,
+            cockpit
+        );
+    } else {
+        motor.update(focus.rpm);
+    }
     if(connected && GetTickCount()-lastHud>250) {
         char title[512];
         if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
@@ -673,6 +689,8 @@ static void sendControls() {
 		}
 	}
 
+	localThrottle = packet.throttle;
+
 	// Send toggles for 300 ms to tolerate a dropped UDP packet.
 	// Server-side rising-edge detection applies each request only once.
 	if(omsiSteeringRequested) {
@@ -737,7 +755,11 @@ static bool connectTo(const char* ipv4) {
     u_long nonBlocking=1;ioctlsocket(socketUdp,FIONBIO,&nonBlocking);
     connected=true;myId=0;gotSnapshot=false;lastTick=0;earlier=Snapshot();latest=Snapshot();
     ShowWindow(ipLabel,SW_HIDE);ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
-    motor.start();
+    if(importedAudioReady && importedBusAudio.start()) {
+        motor.stop();
+    } else {
+        motor.start();
+    }
 	EnableWindow(resetButton, TRUE);
 	EnableWindow(omsiSteeringButton, TRUE);
 	lastShownSteeringMode = 0xFFFFFFFFu;
@@ -745,6 +767,93 @@ static bool connectTo(const char* ipv4) {
 	previousCcedillaDown = false;
     return true;
 }
+static bool loadBusScriptFiles(
+    const std::string& path,
+    bool showDialog,
+    HWND dialogOwner
+) {
+    buscfg::ModScripts scripts;
+
+    if(!scripts.load(path)) {
+        if(showDialog) {
+            MessageBoxA(
+                dialogOwner,
+                scripts.diagnostic.c_str(),
+                "Falha ao ler scripts",
+                MB_OK | MB_ICONWARNING
+            );
+        }
+
+        return false;
+    }
+
+    importedAudioReady = importedBusAudio.load(scripts);
+
+    if(connected) {
+        if(importedAudioReady && importedBusAudio.start()) {
+            motor.stop();
+        } else {
+            motor.start();
+        }
+    }
+
+    std::string information = scripts.diagnostic;
+    information += "\\n";
+    information += importedBusAudio.report();
+
+    if(scripts.hasManual || scripts.hasAutomatic) {
+        information +=
+            "\\n\\nCAMBIO: carregue esta mesma configuracao no servidor "
+            "com DX11BUS_MOD_CONFIG e reinicie-o. "
+            "A simulacao de transmissoes e autoritativa.";
+    }
+
+    FILE* report = fopen(
+        (applicationDirectory() + "bus_scripts.log").c_str(),
+        "wb"
+    );
+
+    if(report != 0) {
+        fprintf(report, "%s\\n", information.c_str());
+        fclose(report);
+    }
+
+    if(showDialog) {
+        MessageBoxA(
+            dialogOwner,
+            information.c_str(),
+            "Scripts e sons do onibus",
+            MB_OK
+        );
+    }
+
+    return true;
+}
+
+static void browseBusScripts(HWND hwnd) {
+    char filename[2048] = {};
+    OPENFILENAMEA chooser = {};
+
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = hwnd;
+    chooser.lpstrFile = filename;
+    chooser.nMaxFile = sizeof(filename);
+    chooser.lpstrFilter =
+        "Configuracao do onibus (*.ini;*.txt)\\0*.ini;*.txt\\0"
+        "Todos os arquivos (*.*)\\0*.*\\0";
+    chooser.nFilterIndex = 1;
+    chooser.Flags =
+        OFN_FILEMUSTEXIST |
+        OFN_PATHMUSTEXIST |
+        OFN_NOCHANGEDIR;
+
+    if(!GetOpenFileNameA(&chooser)) {
+        return;
+    }
+
+    loadBusScriptFiles(filename, true, hwnd);
+}
+
 static void browseOmsiModel(HWND hwnd){
     char filename[MAX_PATH]={};
     OPENFILENAMEA chooser={};chooser.lStructSize=sizeof(chooser);
@@ -877,6 +986,11 @@ static LRESULT CALLBACK windowProcedure(
 			return 0;
 		}
 
+        if(command == 106) {
+            browseBusScripts(hwnd);
+            return 0;
+        }
+
 		if(command == 102) {
 			char ipv4[80] = {};
 			GetWindowTextA(ipInput, ipv4, sizeof(ipv4));
@@ -928,6 +1042,14 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
 		835, 14, 230, 27,
 		windowHandle, (HMENU)105, instance, 0
 	);
+
+    scriptButton = CreateWindowA(
+        "BUTTON",
+        "Ler Scripts/Sons",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        1077, 14, 175, 27,
+        windowHandle, (HMENU)106, instance, 0
+    );
     ShowWindow(windowHandle,show);
     if(!initializeGraphics(windowHandle)){
         MessageBoxA(windowHandle,"Nao foi possivel inicializar DX11 ou carregar os shaders .cso.","DX11 Bus",MB_ICONERROR);
@@ -941,6 +1063,19 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
         FILE* log=fopen((applicationDirectory()+"omsi_import.log").c_str(),"wb");
         if(log){fprintf(log,"%s\n",omsiBus.report.c_str());fclose(log);}
     }
+    // Both programs read DX11BUS_MOD_CONFIG. The client loads the sound
+    // files; the server separately loads authoritative gearbox physics.
+    char modConfigPath[2048] = {};
+    const DWORD modConfigLength = GetEnvironmentVariableA(
+        "DX11BUS_MOD_CONFIG",
+        modConfigPath,
+        sizeof(modConfigPath)
+    );
+
+    if(modConfigLength > 0 && modConfigLength < sizeof(modConfigPath)) {
+        loadBusScriptFiles(modConfigPath, false, windowHandle);
+    }
+
     std::string cmd=commandLine;
     if(!cmd.empty()){
         size_t start=cmd.find_first_not_of(" \t\"");
