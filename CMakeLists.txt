@@ -26,15 +26,15 @@ find_program(FXC_EXECUTABLE NAMES fxc fxc.exe)
 if(NOT FXC_EXECUTABLE)
     message(FATAL_ERROR "fxc.exe not found: set FXC_EXECUTABLE")
 endif()
-set(VS_CSO "\${CMAKE_CURRENT_BINARY_DIR}/bus_vs.cso")
-set(PS_CSO "\${CMAKE_CURRENT_BINARY_DIR}/bus_ps.cso")
-add_custom_command(OUTPUT "\${VS_CSO}"
-    COMMAND "\${FXC_EXECUTABLE}" /nologo /T vs_4_0 /E VSMain /Fo "\${VS_CSO}" "\${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl"
-    DEPENDS "\${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl" VERBATIM)
-add_custom_command(OUTPUT "\${PS_CSO}"
-    COMMAND "\${FXC_EXECUTABLE}" /nologo /T ps_4_0 /E PSMain /Fo "\${PS_CSO}" "\${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl"
-    DEPENDS "\${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl" VERBATIM)
-add_custom_target(bus_shaders ALL DEPENDS "\${VS_CSO}" "\${PS_CSO}")
+set(VS_CSO "${CMAKE_CURRENT_BINARY_DIR}/bus_vs.cso")
+set(PS_CSO "${CMAKE_CURRENT_BINARY_DIR}/bus_ps.cso")
+add_custom_command(OUTPUT "${VS_CSO}"
+    COMMAND "${FXC_EXECUTABLE}" /nologo /T vs_4_0 /E VSMain /Fo "${VS_CSO}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl" VERBATIM)
+add_custom_command(OUTPUT "${PS_CSO}"
+    COMMAND "${FXC_EXECUTABLE}" /nologo /T ps_4_0 /E PSMain /Fo "${PS_CSO}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/bus.hlsl" VERBATIM)
+add_custom_target(bus_shaders ALL DEPENDS "${VS_CSO}" "${PS_CSO}")
 add_executable(bus_client WIN32 src/client.cpp)
 add_dependencies(bus_client bus_shaders)
 target_link_libraries(bus_client d3d11 dxgi ws2_32 user32 gdi32 winmm ole32 uuid windowscodecs)
@@ -45,10 +45,10 @@ if(BUS_WITH_ASSIMP)
     elseif(TARGET assimp)
         target_link_libraries(bus_client assimp)
     else()
-        target_include_directories(bus_client PRIVATE \${ASSIMP_INCLUDE_DIRS})
-        target_link_libraries(bus_client \${ASSIMP_LIBRARIES})
+        target_include_directories(bus_client PRIVATE ${ASSIMP_INCLUDE_DIRS})
+        target_link_libraries(bus_client ${ASSIMP_LIBRARIES})
     endif()
 endif()
 add_custom_command(TARGET bus_client POST_BUILD
-    COMMAND \${CMAKE_COMMAND} -E copy_if_different "\${VS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_vs.cso"
-    COMMAND \${CMAKE_COMMAND} -E copy_if_different "\${PS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_ps.cso")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${VS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_vs.cso"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PS_CSO}" "$<TARGET_FILE_DIR:bus_client>/bus_ps.cso")
