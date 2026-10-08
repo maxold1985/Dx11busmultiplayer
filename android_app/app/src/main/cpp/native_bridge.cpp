@@ -117,6 +117,7 @@ int viewportW=1,viewportH=1;
 int socketFd=-1;
 sockaddr_in serverAddr={};
 bool connected=false,gotSnapshot=false,cockpit=false;
+bool glassDiagnostic=false,glassReverseFaces=false;
 NetPacket latest={};
 NetPacket earlier={};
 bool hasPreviousSnapshot=false;
@@ -578,8 +579,13 @@ void prepareGpu(JNIEnv* env) {
 }
 void drawPart(GpuMesh& mesh,GpuPart& p,const Mat4& matrix) {
     glUniformMatrix4fv(matrixUniform,1,GL_FALSE,matrix.m);
-    glUniform4fv(colorUniform,1,p.rgba);
-    glUniform1i(useTextureUniform,p.texture?1:0);
+    if(p.glass && glassDiagnostic) {
+        glUniform4f(colorUniform,0.18f,0.75f,0.85f,0.22f);
+        glUniform1i(useTextureUniform,0);
+    } else {
+        glUniform4fv(colorUniform,1,p.rgba);
+        glUniform1i(useTextureUniform,p.texture?1:0);
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D,p.texture);
     glBindVertexArray(mesh.vao);
@@ -657,10 +663,13 @@ void drawBus(const Mat4& pv,const BusState& b,V3 camera) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
+    glEnable(GL_CULL_FACE);
+    glCullFace(glassReverseFaces ? GL_FRONT : GL_BACK);
     for(size_t i=0;i<glass.size();++i)
         drawPart(models[glass[i].mesh],models[glass[i].mesh].parts[glass[i].part],glass[i].matrix);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
     if(!imported)drawFallbackDetails(pv,b);
 }
 void initBox() {
@@ -1142,6 +1151,14 @@ Java_com_dx11bus_android_BusActivity_nativeCamera(JNIEnv*,jclass,jfloat dx,jfloa
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeCockpit(JNIEnv*,jclass) {
     cockpit=!cockpit;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeGlassDiagnostic(JNIEnv*,jclass) {
+    glassDiagnostic=!glassDiagnostic;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_dx11bus_android_BusActivity_nativeGlassFaces(JNIEnv*,jclass) {
+    glassReverseFaces=!glassReverseFaces;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_dx11bus_android_BusActivity_nativeSoundEvent(JNIEnv* env,jclass,jstring eventName) {
