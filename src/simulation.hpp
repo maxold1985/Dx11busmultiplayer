@@ -68,7 +68,8 @@ struct Dynamics {
     float wheelTravel[6];
     int boardedAtStop;
     uint32_t lastFlags;
-    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),lastFlags(0) {
+    bool manualGear;
+    Dynamics():verticalSpeed(0),pitchSpeed(0),rollSpeed(0),throttle(0),steering(0),brake(0),boardingSeconds(0),boardedAtStop(0),lastFlags(0),manualGear(false) {
         memset(&b,0,sizeof(b));b.y=1.6f;b.gear=1;b.rpm=700;for(int i=0;i<6;i++)wheelTravel[i]=0;
     }
 };
@@ -80,8 +81,9 @@ inline void input(Dynamics& d,float t,float steer,float brake,uint32_t flags) {
     if(pressed&INPUT_TOGGLE_DOOR) {
         if(std::fabs(d.b.speed)<0.5f) d.b.door=d.b.door>0.5f?0.0f:1.0f;
     }
-    if(pressed&INPUT_GEAR_UP) d.b.gear=std::min(6,d.b.gear+1);
-    if(pressed&INPUT_GEAR_DOWN) d.b.gear=std::max(1,d.b.gear-1);
+    if(pressed&INPUT_AUTO_GEAR) d.manualGear=false;
+    if(pressed&INPUT_GEAR_UP) {d.manualGear=true;d.b.gear=std::min(6,d.b.gear+1);}
+    if(pressed&INPUT_GEAR_DOWN) {d.manualGear=true;d.b.gear=std::max(1,d.b.gear-1);}
     d.lastFlags=flags;
 }
 inline float visualTravel(const BusState& b,int i) {
@@ -138,8 +140,10 @@ inline void step(Dynamics& d,float dt) {
     }
     b.wheelRotation+=b.speed/WHEEL_RADIUS*dt;
     const float kmh=std::fabs(b.speed)*3.6f;
-    if(d.throttle>0.0f && b.gear<6 && kmh>b.gear*18.0f)++b.gear;
-    if(b.gear>1 && kmh<(b.gear-1)*15.0f)--b.gear;
+    if(!d.manualGear) {
+        if(d.throttle>0.0f && b.gear<6 && kmh>b.gear*18.0f)++b.gear;
+        if(b.gear>1 && kmh<(b.gear-1)*15.0f)--b.gear;
+    }
     b.rpm=clamp(700.0f+kmh*95.0f/std::max(1,b.gear)+std::fabs(d.throttle)*400.0f,700,3400);
     suspension(d,dt);
     Stop s=stop((int)b.nextStop);
