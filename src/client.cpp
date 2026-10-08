@@ -30,9 +30,14 @@ static HWND ipInput = 0;
 static HWND connectButton = 0;
 static HWND omsiButton = 0;
 static HWND resetButton = 0;
+static HWND omsiSteeringButton = 0;
 
 static bool resetRequested = false;
 static DWORD resetRequestedAt = 0;
+static bool omsiSteeringRequested = false;
+static DWORD omsiSteeringRequestedAt = 0;
+static bool previousCcedillaDown = false;
+static uint32_t lastShownSteeringMode = 0xFFFFFFFFu;
 static ID3D11Device* device=0;
 static ID3D11DeviceContext* context=0;
 static IDXGISwapChain* swapChain=0;
@@ -532,11 +537,28 @@ static void drawFrame(){
         char title[512];
         if(latest.count>0 && (DWORD)(GetTickCount()-latest.received)>3000)
             sprintf(title,"DX11 Bus | Sem resposta do servidor ha mais de 3 segundos");
-        else if(latest.count>0)
-            sprintf(title,"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | %u passageiros | Parada %u | %s | Veiculos %u | F1 camera | RMB orbita | roda zoom | R origem | X %.0f Z %.0f | E porta Q/Z manual G auto",
-               myId,fabsf(focus.speed)*3.6f,(int)focus.gear,focus.rpm,(unsigned)focus.passengers,
-               (unsigned)focus.nextStop+1,cockpit?"Cabine":"Externa",(unsigned)latest.count,
-               focus.x,focus.z);
+        else if(latest.count > 0) {
+			const char* steeringLabel = focus.steeringMode == STEERING_OMSI_APPROX ?
+				"OMSI aprox." : "Classica";
+
+			sprintf(
+				title,
+				"DX11 Bus | ID %u | %.0f km/h | Marcha %d | %.0f RPM | "
+				"%u passageiros | Parada %u | %s | Veiculos %u | "
+				"Direcao: %s (C cedilha) | R origem | X %.0f Z %.0f",
+				myId,
+				fabsf(focus.speed) * 3.6f,
+				(int)focus.gear,
+				focus.rpm,
+				(unsigned)focus.passengers,
+				(unsigned)focus.nextStop + 1,
+				cockpit ? "Cabine" : "Externa",
+				(unsigned)latest.count,
+				steeringLabel,
+				focus.x,
+				focus.z
+			);
+		}
         else sprintf(title,"DX11 Bus | Esperando servidor UDP 27015...");
         SetWindowTextA(windowHandle,title);lastHud=GetTickCount();
     }
@@ -554,6 +576,63 @@ static void requestOriginReset() {
 	orbitYaw = 0.0f;
 	orbitPitch = 0.38f;
 	orbitDistance = 16.0f;
+}
+
+static void requestOmsiSteeringToggle() {
+	if(!connected || omsiSteeringRequested) {
+		return;
+	}
+
+	omsiSteeringRequestedAt = GetTickCount();
+	omsiSteeringRequested = true;
+}
+
+// Resolve Ç through the active Windows keyboard layout (ABNT2 included).
+// Polling also works when a child button has focus, unlike WM_CHAR alone.
+static void pollOmsiSteeringKey() {
+	const SHORT mappedKey = VkKeyScanExW(
+		L'\u00e7',
+		GetKeyboardLayout(0)
+	);
+
+	bool keyDown = false;
+
+	if(mappedKey != -1 && GetForegroundWindow() == windowHandle) {
+		const int virtualKey = mappedKey & 0xFF;
+		keyDown = (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+	}
+
+	if(keyDown && !previousCcedillaDown) {
+		requestOmsiSteeringToggle();
+	}
+
+	previousCcedillaDown = keyDown;
+}
+
+static void updateOmsiSteeringButton() {
+	if(!connected || !omsiSteeringButton || !gotSnapshot) {
+		return;
+	}
+
+	const BusState* player = findBus(latest, myId);
+
+	if(!player || player->steeringMode == lastShownSteeringMode) {
+		return;
+	}
+
+	lastShownSteeringMode = player->steeringMode;
+
+	if(player->steeringMode == STEERING_OMSI_APPROX) {
+		SetWindowTextW(
+			omsiSteeringButton,
+			L"Direcao OMSI: ON (\u00c7)"
+		);
+	} else {
+		SetWindowTextW(
+			omsiSteeringButton,
+			L"Direcao OMSI: OFF (\u00c7)"
+		);
+	}
 }
 
 static void sendControls() {
@@ -591,6 +670,18 @@ static void sendControls() {
 
 		if(GetAsyncKeyState('G') & 0x8000) {
 			packet.flags |= INPUT_AUTO_GEAR;
+		}
+	}
+
+	// Send toggles for 300 ms to tolerate a dropped UDP packet.
+	// Server-side rising-edge detection applies each request only once.
+	if(omsiSteeringRequested) {
+		const DWORD elapsed = GetTickCount() - omsiSteeringRequestedAt;
+
+		if(elapsed < 300) {
+			packet.flags |= INPUT_TOGGLE_OMSI_STEERING;
+		} else {
+			omsiSteeringRequested = false;
 		}
 	}
 
@@ -648,6 +739,10 @@ static bool connectTo(const char* ipv4) {
     ShowWindow(ipLabel,SW_HIDE);ShowWindow(ipInput,SW_HIDE);ShowWindow(connectButton,SW_HIDE);
     motor.start();
 	EnableWindow(resetButton, TRUE);
+	EnableWindow(omsiSteeringButton, TRUE);
+	lastShownSteeringMode = 0xFFFFFFFFu;
+	omsiSteeringRequested = false;
+	previousCcedillaDown = false;
     return true;
 }
 static void browseOmsiModel(HWND hwnd){
@@ -777,6 +872,11 @@ static LRESULT CALLBACK windowProcedure(
 			return 0;
 		}
 
+		if(command == 105) {
+			requestOmsiSteeringToggle();
+			return 0;
+		}
+
 		if(command == 102) {
 			char ipv4[80] = {};
 			GetWindowTextA(ipInput, ipv4, sizeof(ipv4));
@@ -820,6 +920,14 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
 		670, 14, 150, 27,
 		windowHandle, (HMENU)104, instance, 0
 	);
+
+	omsiSteeringButton = CreateWindowW(
+		L"BUTTON",
+		L"Direcao OMSI: OFF (\u00c7)",
+		WS_CHILD | WS_VISIBLE | WS_DISABLED | BS_PUSHBUTTON,
+		835, 14, 230, 27,
+		windowHandle, (HMENU)105, instance, 0
+	);
     ShowWindow(windowHandle,show);
     if(!initializeGraphics(windowHandle)){
         MessageBoxA(windowHandle,"Nao foi possivel inicializar DX11 ou carregar os shaders .cso.","DX11 Bus",MB_ICONERROR);
@@ -854,9 +962,19 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR commandLine,int show){
         QueryPerformanceCounter(&now);
         double delta=double(now.QuadPart-last.QuadPart)/double(frequency.QuadPart);last=now;
         accumulator+=std::min(0.20,delta);
-        while(accumulator>=1.0/30.0){sendControls();accumulator-=1.0/30.0;}
-        receiveUpdates();
-        if(!IsIconic(windowHandle))drawFrame();
+		pollOmsiSteeringKey();
+
+		while(accumulator >= 1.0 / 30.0) {
+			sendControls();
+			accumulator -= 1.0 / 30.0;
+		}
+
+		receiveUpdates();
+		updateOmsiSteeringButton();
+
+		if(!IsIconic(windowHandle)) {
+			drawFrame();
+		}
         Sleep(1);
     }
     if(socketUdp!=INVALID_SOCKET)closesocket(socketUdp);
