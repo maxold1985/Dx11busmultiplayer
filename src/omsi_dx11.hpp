@@ -25,7 +25,7 @@ inline ID3D11ShaderResourceView* loadDDS(ID3D11Device* device,const std::string&
     std::vector<uint8_t> d;
     if(!loadBytes(path,d,128*1024*1024)||d.size()<128)return 0;
     if(memcmp(&d[0],"DDS ",4)!=0||ddsU32(d,4)!=124)return 0;
-    const uint32_t height=ddsU32(d,12),width=ddsU32(d,16),fourcc=ddsU32(d,84);
+    const uint32_t height=ddsU32(d,12),width=ddsU32(d,16),fourcc=ddsU32(d,88);
     if(width==0||height==0||width>8192||height>8192)return 0;
     DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
     size_t at=128;unsigned blockBytes=0;
