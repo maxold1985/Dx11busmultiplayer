@@ -3,6 +3,9 @@
 #include "omsi_format.hpp"
 #include "simulation.hpp"
 #include "model_assimp.hpp"
+#ifdef BUS_HAS_ASSIMP
+#include <assimp/material.h>
+#endif
 #include "math_compat.h"
 #include <map>
 #include <fstream>
