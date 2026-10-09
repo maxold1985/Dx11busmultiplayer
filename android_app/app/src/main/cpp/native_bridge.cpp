@@ -465,7 +465,12 @@ bool appendMesh(const omsi::Mesh& source,const std::string& origin,
         const omsi::Vertex& p=source.vertices[v];
         mesh.vertices.push_back(p.x);mesh.vertices.push_back(p.y);
         mesh.vertices.push_back(p.z);mesh.vertices.push_back(p.u);
-        mesh.vertices.push_back(p.v);
+        // The shared 3DS reader already converts V for WIC. GLES shader
+        // flips V on upload, so undo that conversion for 3DS only.
+        const std::string extension=omsi::lower(origin);
+        const bool from3DS=extension.size()>=4 &&
+            extension.substr(extension.size()-4)==".3ds";
+        mesh.vertices.push_back(from3DS?1.0f-p.v:p.v);
     }
     const unsigned materials=(unsigned)std::max((size_t)1,source.materials.size());
     for(unsigned m=0;m<materials;++m) {
