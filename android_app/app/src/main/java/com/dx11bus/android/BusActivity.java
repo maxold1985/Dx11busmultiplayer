@@ -224,10 +224,7 @@ public final class BusActivity extends Activity {
         bottom.addView(driving);
 
         LinearLayout extras=new LinearLayout(this);
-        addWeightedAction(extras,"RE (SEGURAR)",() -> {
-            reverse=!reverse;
-            sendControls();
-        });
+        addHold(extras,"RE (SEGURAR)",2);
         addWeightedAction(extras,"DIRECAO OMSI",() -> surface.queueEvent(() -> nativeFlag(32)));
         bottom.addView(extras);
         FrameLayout.LayoutParams bottomParams=new FrameLayout.LayoutParams(
