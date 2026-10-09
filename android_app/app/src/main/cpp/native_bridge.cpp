@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -217,20 +219,72 @@ bool exists(const std::string& p) {
     if(!f)return false;
     fclose(f);return true;
 }
+// Android filesystem is case-sensitive; OMSI mods were authored for Windows.
+// Match each directory component without case sensitivity, but prefer exact paths.
+std::string existingCaseInsensitive(const std::string& requested) {
+    const std::string path=omsi::normalized(requested);
+    if(exists(path))return path;
+    if(path.empty())return "";
+    std::string current=path[0]=='/'?"/":"";
+    size_t at=path[0]=='/'?1:0;
+    while(at<path.size()) {
+        const size_t slash=path.find('/',at);
+        const std::string component=path.substr(at,slash==std::string::npos?
+            std::string::npos:slash-at);
+        at=slash==std::string::npos?path.size():slash+1;
+        if(component.empty()||component==".")continue;
+        if(component=="..") {
+            current=omsi::join(current,"../");
+            continue;
+        }
+        const std::string exact=omsi::join(current,component);
+        struct stat info;
+        if(stat(exact.c_str(),&info)==0) {
+            current=exact;
+            continue;
+        }
+        DIR* dir=opendir(current.empty()?".":current.c_str());
+        if(!dir)return "";
+        std::string matched;
+        struct dirent* entry;
+        const std::string needle=omsi::lower(component);
+        while((entry=readdir(dir))!=0) {
+            if(omsi::lower(entry->d_name)==needle) {
+                matched=entry->d_name;
+                break;
+            }
+        }
+        closedir(dir);
+        if(matched.empty())return "";
+        current=omsi::join(current,matched);
+    }
+    return exists(current)?current:"";
+}
 std::string resolveTexture(const std::string& meshPath,const std::string& filename) {
     if(filename.empty())return "";
-    if(filename[0]=='/' && exists(filename))return filename;
-    std::string root=modelRoot;
-    std::string meshDir=omsi::directory(meshPath);
+    const std::string name=omsi::normalized(omsi::trim(filename));
+    if(name.empty())return "";
+    if(name[0]=='/')return existingCaseInsensitive(name);
+    const std::string meshDir=omsi::directory(meshPath);
+    const std::string root=modelRoot;
+    const std::string base=omsi::filename(name);
     const std::string candidates[]={
-        omsi::join(root+"Texture/",filename),
-        omsi::join(root+"texture/",filename),
-        omsi::join(meshDir+"Texture/",filename),
-        omsi::join(meshDir,filename),
-        omsi::join(root,filename)
+        omsi::join(meshDir,name),
+        omsi::join(root+"Texture/",name),
+        omsi::join(root+"texture/",name),
+        omsi::join(meshDir+"Texture/",name),
+        omsi::join(root,name),
+        omsi::join(meshDir+"../Texture/",name),
+        omsi::join(meshDir+"../texture/",name),
+        omsi::join(meshDir+"Texture/",base),
+        omsi::join(root+"Texture/",base),
+        omsi::join(meshDir+"../Texture/",base)
     };
-    for(unsigned i=0;i<sizeof(candidates)/sizeof(candidates[0]);++i)
-        if(exists(candidates[i]))return candidates[i];
+    for(unsigned i=0;i<sizeof(candidates)/sizeof(candidates[0]);++i) {
+        const std::string found=existingCaseInsensitive(candidates[i]);
+        if(!found.empty())return found;
+    }
+    LOGE("OMSI texture missing: %s (mesh: %s)",name.c_str(),meshPath.c_str());
     return "";
 }
 // OMSI frequently uses DDS DXT1/DXT3/DXT5 textures, which BitmapFactory
