@@ -118,13 +118,11 @@ inline bool triangleMesh(const std::vector<uint8_t>& b,const Chunk& section,
             if(c.end-c.data<2)return false;
             const unsigned n=u16(b,c.data);
             if(n>(c.end-c.data-2)/8)return false;
-            // Preserve authored 3DS UVs. The Android GLES vertex shader
-            // converts V once for top-down uploaded texture pixels.
-            // Flipping here as well mirrored the texture vertically.
+            // 3DS stores bottom-left texture coordinates; WIC uses top-left.
             for(unsigned i=0;i<n && i<mesh.vertices.size();i++){
                 const size_t p=c.data+2+i*8;
                 mesh.vertices[i].u=f32(b,p);
-                mesh.vertices[i].v=f32(b,p+4);
+                mesh.vertices[i].v=1.0f-f32(b,p+4);
             }
         } else if(c.id==0x4120){
             if(!faceList(b,c,mesh,groups))return false;
