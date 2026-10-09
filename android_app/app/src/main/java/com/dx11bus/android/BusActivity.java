@@ -153,65 +153,83 @@ public final class BusActivity extends Activity {
         });
         root.addView(surface);
 
-        LinearLayout top = new LinearLayout(this);
+        // Compact top bar: keep the 3D viewport clear; advanced options live in a menu.
+        LinearLayout top=new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
-        top.setBackgroundColor(0x70000000);
-        status = new TextView(this);
+        top.setBackgroundColor(0xA018202A);
+        status=new TextView(this);
         status.setTextColor(Color.WHITE);
-        status.setTextSize(12);
-        status.setMaxLines(4);
+        status.setTextSize(11);
+        status.setMaxLines(3);
         status.setText("Android OpenGL ES 3.0 | Aguardando...");
-        status.setPadding(dp(8),dp(3),dp(8),dp(3));
+        status.setPadding(dp(10),dp(3),dp(8),dp(3));
         top.addView(status);
-        HorizontalScrollView tools = new HorizontalScrollView(this);
-        tools.setHorizontalScrollBarEnabled(false);
-        LinearLayout actions = new LinearLayout(this);
-        addAction(actions,"MODELO",() -> openFile(PICK_MODEL));
-        addAction(actions,"SCRIPT",() -> openFile(PICK_SCRIPT));
-        addAction(actions,"PASTA OMSI",this::openFolder);
-        addAction(actions,"ZIP OMSI",() -> openFile(PICK_ZIP));
-        addAction(actions,"MODELOS MOD",() -> chooseFromImportedFolder(false));
-        addAction(actions,"SCRIPTS MOD",() -> chooseFromImportedFolder(true));
-        addAction(actions,"CONECTAR",this::askServer);
-        addAction(actions,"DESCONECTAR",() -> surface.queueEvent(BusActivity::nativeDisconnect));
-        addAction(actions,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
-        addAction(actions,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
-        addAction(actions,"ZOOM -",() -> surface.queueEvent(() -> nativeZoom(2.0f)));
-        addAction(actions,"VIDRO COR",() -> surface.queueEvent(BusActivity::nativeGlassDiagnostic));
-        addAction(actions,"VIDRO FACES",() -> surface.queueEvent(BusActivity::nativeGlassFaces));
-        addAction(actions,"RESET",() -> surface.queueEvent(() -> nativeFlag(16)));
-        tools.addView(actions);
-        top.addView(tools);
-        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+        LinearLayout toolbar=new LinearLayout(this);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        addAction(toolbar,"MENU",this::showBusMenu);
+        addAction(toolbar,"CAMERA",() -> surface.queueEvent(BusActivity::nativeCockpit));
+        addAction(toolbar,"ZOOM +",() -> surface.queueEvent(() -> nativeZoom(-2.0f)));
+        addAction(toolbar,"ZOOM -",() -> surface.queueEvent(() -> nativeZoom(2.0f)));
+        addAction(toolbar,"PORTAS",() -> surface.queueEvent(() -> nativeFlag(1)));
+        top.addView(toolbar);
+        FrameLayout.LayoutParams topParams=new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.TOP);
         root.addView(top,topParams);
 
-        LinearLayout bottom = new LinearLayout(this);
+        // Driving console: steering left, transmission in the middle, pedals right.
+        LinearLayout bottom=new LinearLayout(this);
         bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setBackgroundColor(0x70000000);
-        LinearLayout driving = new LinearLayout(this);
-        driving.setGravity(Gravity.CENTER);
-        addHold(driving,"ACELERAR",1);
-        addHold(driving,"RE",2);
-        addHold(driving,"ESQUERDA",3);
-        addHold(driving,"DIREITA",4);
-        addHold(driving,"FREIO",5);
-        addHold(driving,"EMBREAGEM",6);
+        bottom.setPadding(dp(6),dp(5),dp(6),dp(5));
+        bottom.setBackgroundColor(0xC018202A);
+        LinearLayout auxiliary=new LinearLayout(this);
+        auxiliary.setGravity(Gravity.CENTER);
+        addWeightedAction(auxiliary,"PORTA",() -> surface.queueEvent(() -> nativeFlag(1)));
+        addWeightedAction(auxiliary,"BUZINA",() -> surface.queueEvent(() -> nativeSoundEvent("horn")));
+        addWeightedAction(auxiliary,"SETA",() -> surface.queueEvent(() -> nativeSoundEvent("blinkers")));
+        addWeightedAction(auxiliary,"PARADA",() -> surface.queueEvent(() -> nativeSoundEvent("stopRequest")));
+        addWeightedAction(auxiliary,"FREIO MAO",() -> surface.queueEvent(() -> nativeSoundEvent("parkingBrakeOn")));
+        bottom.addView(auxiliary);
+
+        LinearLayout driving=new LinearLayout(this);
+        driving.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout steerGroup=new LinearLayout(this);
+        steerGroup.setOrientation(LinearLayout.VERTICAL);
+        steerGroup.addView(controlLabel("DIRECAO"));
+        LinearLayout steerButtons=new LinearLayout(this);
+        addHold(steerButtons,"◀",3);
+        addHold(steerButtons,"▶",4);
+        steerGroup.addView(steerButtons);
+        driving.addView(steerGroup,new LinearLayout.LayoutParams(0,dp(83),3));
+
+        LinearLayout gearGroup=new LinearLayout(this);
+        gearGroup.setOrientation(LinearLayout.VERTICAL);
+        gearGroup.addView(controlLabel("TRANSMISSAO"));
+        LinearLayout gearButtons=new LinearLayout(this);
+        addWeightedAction(gearButtons,"R",() -> surface.queueEvent(() -> nativeFlag(4)));
+        addWeightedAction(gearButtons,"D",() -> surface.queueEvent(() -> nativeFlag(2)));
+        addWeightedAction(gearButtons,"AUTO",() -> surface.queueEvent(() -> nativeFlag(8)));
+        gearGroup.addView(gearButtons);
+        driving.addView(gearGroup,new LinearLayout.LayoutParams(0,dp(83),3));
+
+        LinearLayout pedalGroup=new LinearLayout(this);
+        pedalGroup.setOrientation(LinearLayout.VERTICAL);
+        pedalGroup.addView(controlLabel("PEDAIS"));
+        LinearLayout pedalButtons=new LinearLayout(this);
+        addHold(pedalButtons,"EMBR.",6);
+        addHold(pedalButtons,"FREIO",5);
+        addHold(pedalButtons,"ACEL.",1);
+        pedalGroup.addView(pedalButtons);
+        driving.addView(pedalGroup,new LinearLayout.LayoutParams(0,dp(83),4));
         bottom.addView(driving);
-        HorizontalScrollView otherScroll=new HorizontalScrollView(this);
-        LinearLayout other=new LinearLayout(this);
-        addAction(other,"PORTA",() -> surface.queueEvent(() -> nativeFlag(1)));
-        addAction(other,"MARCHA +",() -> surface.queueEvent(() -> nativeFlag(2)));
-        addAction(other,"MARCHA -",() -> surface.queueEvent(() -> nativeFlag(4)));
-        addAction(other,"AUTO",() -> surface.queueEvent(() -> nativeFlag(8)));
-        addAction(other,"DIRECAO OMSI",() -> surface.queueEvent(() -> nativeFlag(32)));
-        addAction(other,"BUZINA",() -> surface.queueEvent(() -> nativeSoundEvent("horn")));
-        addAction(other,"PARADA",() -> surface.queueEvent(() -> nativeSoundEvent("stopRequest")));
-        addAction(other,"SETA",() -> surface.queueEvent(() -> nativeSoundEvent("blinkers")));
-        addAction(other,"FREIO MAO",() -> surface.queueEvent(() -> nativeSoundEvent("parkingBrakeOn")));
-        otherScroll.addView(other);
-        bottom.addView(otherScroll);
+
+        LinearLayout extras=new LinearLayout(this);
+        addWeightedAction(extras,"RE (SEGURAR)",() -> {
+            reverse=!reverse;
+            sendControls();
+        });
+        addWeightedAction(extras,"DIRECAO OMSI",() -> surface.queueEvent(() -> nativeFlag(32)));
+        bottom.addView(extras);
         FrameLayout.LayoutParams bottomParams=new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM);
@@ -234,6 +252,49 @@ public final class BusActivity extends Activity {
         button.setOnClickListener(v -> action.run());
         parent.addView(button,new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,dp(45)));
+    }
+    private TextView controlLabel(String text) {
+        TextView label=new TextView(this);
+        label.setText(text);
+        label.setTextColor(0xFFE2E8F0);
+        label.setTextSize(10);
+        label.setGravity(Gravity.CENTER);
+        label.setPadding(0,0,0,dp(3));
+        return label;
+    }
+    private void addWeightedAction(LinearLayout parent,String title,Runnable action) {
+        Button button=new Button(this);
+        button.setText(title);
+        button.setTextSize(10);
+        button.setAllCaps(false);
+        button.setMinWidth(0);
+        button.setMinHeight(0);
+        button.setPadding(dp(2),0,dp(2),0);
+        button.setOnClickListener(v -> action.run());
+        parent.addView(button,new LinearLayout.LayoutParams(0,dp(43),1));
+    }
+    private void showBusMenu() {
+        final String[] items={
+            "Carregar modelo","Carregar script","Pasta OMSI","Importar ZIP OMSI",
+            "Modelos importados","Scripts importados","Conectar servidor",
+            "Desconectar","Vidro: cor","Vidro: faces","Reset do onibus"
+        };
+        new AlertDialog.Builder(this).setTitle("Configuracoes do onibus")
+            .setItems(items,(dialog,which)->{
+                switch(which) {
+                    case 0:openFile(PICK_MODEL);break;
+                    case 1:openFile(PICK_SCRIPT);break;
+                    case 2:openFolder();break;
+                    case 3:openFile(PICK_ZIP);break;
+                    case 4:chooseFromImportedFolder(false);break;
+                    case 5:chooseFromImportedFolder(true);break;
+                    case 6:askServer();break;
+                    case 7:surface.queueEvent(BusActivity::nativeDisconnect);break;
+                    case 8:surface.queueEvent(BusActivity::nativeGlassDiagnostic);break;
+                    case 9:surface.queueEvent(BusActivity::nativeGlassFaces);break;
+                    case 10:surface.queueEvent(() -> nativeFlag(16));break;
+                }
+            }).show();
     }
     private void addHold(LinearLayout parent,String name,int key) {
         Button button=new Button(this);
